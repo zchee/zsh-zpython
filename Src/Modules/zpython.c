@@ -7,6 +7,7 @@
                               saved_python_thread = NULL
 
 static PyThreadState *saved_python_thread = NULL;
+static PyObject *globals;
 
 /**/
 static int
@@ -14,18 +15,31 @@ do_zpython(char *nam, char **args, Options ops, int func)
 {
     char *saved_locale;
     size_t locale_size = 0;
+    int exit_code = 0;
+    PyObject *result;
+
     saved_locale = setlocale(LC_NUMERIC, NULL);
     if(saved_locale == NULL || strcmp(saved_locale, "C") == 0)
         saved_locale = NULL;
     else {
+        char *saved_locale_copy;
         locale_size = (strlen(saved_locale)+1) * sizeof(char);
-        char *saved_locale_copy = (char *) zalloc(locale_size);
+        saved_locale_copy = (char *) zalloc(locale_size);
         memcpy((void *) saved_locale_copy, (void *) saved_locale, locale_size);
         (void)setlocale(LC_NUMERIC, "C");
     }
     PYTHON_RESTORE_THREAD;
 
-    PyRun_SimpleString(*args);
+    result = PyRun_String(*args, Py_file_input, globals, globals);
+    if(result == NULL)
+    {
+        if(PyErr_Occurred())
+            PyErr_PrintEx(0);
+        exit_code = 1;
+    }
+    else
+        Py_DECREF(result);
+    PyErr_Clear();
 
     PYTHON_SAVE_THREAD;
     if(saved_locale != NULL)
@@ -33,6 +47,7 @@ do_zpython(char *nam, char **args, Options ops, int func)
         (void)setlocale(LC_NUMERIC, saved_locale);
         zfree(saved_locale, locale_size);
     }
+    return exit_code;
 }
 
 static struct builtin bintab[] = {
@@ -75,6 +90,7 @@ boot_(Module m)
 {
     Py_Initialize();
     PyEval_InitThreads();
+    globals = PyModule_GetDict(PyImport_AddModule("__main__"));
     PYTHON_SAVE_THREAD;
     return 0;
 }
