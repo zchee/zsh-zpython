@@ -13,21 +13,9 @@ static PyObject *globals;
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
-    char *saved_locale;
-    size_t locale_size = 0;
     int exit_code = 0;
     PyObject *result;
 
-    saved_locale = setlocale(LC_NUMERIC, NULL);
-    if(saved_locale == NULL || strcmp(saved_locale, "C") == 0)
-        saved_locale = NULL;
-    else {
-        char *saved_locale_copy;
-        locale_size = (strlen(saved_locale)+1) * sizeof(char);
-        saved_locale_copy = (char *) zalloc(locale_size);
-        memcpy((void *) saved_locale_copy, (void *) saved_locale, locale_size);
-        (void)setlocale(LC_NUMERIC, "C");
-    }
     PYTHON_RESTORE_THREAD;
 
     result = PyRun_String(*args, Py_file_input, globals, globals);
@@ -42,11 +30,6 @@ do_zpython(char *nam, char **args, Options ops, int func)
     PyErr_Clear();
 
     PYTHON_SAVE_THREAD;
-    if(saved_locale != NULL)
-    {
-        (void)setlocale(LC_NUMERIC, saved_locale);
-        zfree(saved_locale, locale_size);
-    }
     return exit_code;
 }
 
