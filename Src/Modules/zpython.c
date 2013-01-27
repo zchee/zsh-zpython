@@ -67,12 +67,31 @@ enables_(Module m, int **enables)
     return handlefeatures(m, &module_features, enables);
 }
 
+static PyObject *
+ZshEval(UNUSED(PyObject *self), PyObject *args)
+{
+    char *command;
+
+    if(!PyArg_ParseTuple(args, "s", &command))
+        return NULL;
+
+    execstring(command, 1, 0, "zpython");
+
+    Py_RETURN_NONE;
+}
+
+static struct PyMethodDef ZshMethods[] = {
+    {"eval", ZshEval, 1, "Evaluate command in current shell context",},
+    {NULL, NULL, 0, NULL},
+};
+
 /**/
 int
 boot_(Module m)
 {
     Py_Initialize();
     PyEval_InitThreads();
+    Py_InitModule4("zsh", ZshMethods, (char *)NULL, (PyObject *)NULL, PYTHON_API_VERSION);
     globals = PyModule_GetDict(PyImport_AddModule("__main__"));
     PYTHON_SAVE_THREAD;
     return 0;
