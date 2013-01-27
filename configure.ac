@@ -2625,6 +2625,126 @@ AS_HELP_STRING([--enable-libc-musl],[compile with musl as the C library]),
 fi])
 
 dnl
+dnl zsh/zpython module
+dnl
+ifdef([zpython],[undefine([zpython])])dnl
+ifdef([zpython_confdir],[undefine([zpython_confdir])])dnl
+AC_ARG_ENABLE(zpython,
+AC_HELP_STRING([--enable-zpython], [compile zsh/zpython module]),
+[zpython="$enableval"], [zpython=yes])
+AC_ARG_WITH(python-config-dir,
+AC_HELP_STRING([--with-python-config-dir=FILE], [Python config directory]),
+[zpython_confdir="$zpython"], [zpython_confdir=""])dnl
+if test x$zpython = xyes; then
+    dnl Copied from vim's src/configure.in
+    AC_PATH_PROGS(zsh_cv_path_python, python2 python)
+    AC_CACHE_CHECK(Python version, zsh_cv_python_version,
+    [[zsh_cv_python_version=`${zsh_cv_path_python} -c 'import sys; print sys.version[:3]'`]])
+    AC_CACHE_CHECK(Python install prefix, zsh_cv_path_python_pfx,
+    [zsh_cv_path_python_pfx=`${zsh_cv_path_python} -c 'import sys; print sys.prefix'`])
+    AC_CACHE_CHECK(Python execution prefix, zsh_cv_path_python_epfx,
+    [zsh_cv_path_python_epfx=`${zsh_cv_path_python} -c 'import sys; print sys.exec_prefix'`])
+    AC_CACHE_VAL(zsh_cv_path_pythonpath,
+    [zsh_cv_path_pythonpath=`unset PYTHONPATH;${zsh_cv_path_python} -c 'import sys; print ":".join(sys.path)'`])
+    AC_CACHE_CHECK(Python configuration directory, zsh_cv_path_python_conf,
+    [zsh_cv_path_python_conf=
+     for path in "${zsh_cv_path_python_pfx}" "${zsh_cv_path_python_epfx}" ; do
+         for subdir in lib64 lib share ; do
+             d="${path}/${subdir}/python${zsh_cv_python_version}/config"
+             if test -d "$d" && test -f "$d/config.c"; then
+                 zsh_cv_path_python_conf="$d"
+             fi
+         done
+     done])
+    PYTHON_CONFDIR="${zsh_cv_path_python_conf}"
+    if test "x$PYTHON_CONFDIR" = "x"; then
+        AC_MSG_RESULT([not found])
+    else
+        AC_CACHE_VAL(zsh_cv_path_python_plibs,
+        [
+            pwd=`pwd`
+            tmp_mkf="$pwd/config-PyMake$$"
+            cat -- "${PYTHON_CONFDIR}/Makefile" - <<'eof' >"${tmp_mkf}"
+__:
+	@echo "python_BASEMODLIBS='$(BASEMODLIBS)'"
+	@echo "python_LIBS='$(LIBS)'"
+	@echo "python_SYSLIBS='$(SYSLIBS)'"
+	@echo "python_LINKFORSHARED='$(LINKFORSHARED)'"
+	@echo "python_DLLLIBRARY='$(DLLLIBRARY)'"
+	@echo "python_INSTSONAME='$(INSTSONAME)'"
+eof
+            dnl -- delete the lines from make about Entering/Leaving directory
+            eval "`cd ${PYTHON_CONFDIR} && make -f "${tmp_mkf}" __ | sed '/ directory /d'`"
+            rm -f -- "${tmp_mkf}"
+            if test "${zsh_cv_python_version}" = "1.4"; then
+                zsh_cv_path_python_plibs="${PYTHON_CONFDIR}/libModules.a ${PYTHON_CONFDIR}/libPython.a ${PYTHON_CONFDIR}/libObjects.a ${PYTHON_CONFDIR}/libParser.a"
+            else
+                zsh_cv_path_python_plibs="-L${PYTHON_CONFDIR} -lpython${zsh_cv_python_version}"
+            fi
+            zsh_cv_path_python_plibs="${zsh_cv_path_python_plibs} ${python_BASEMODLIBS} ${python_LIBS} ${python_SYSLIBS} ${python_LINKFORSHARED}"
+            dnl remove -ltermcap, it can conflict with an earlier -lncurses
+            zsh_cv_path_python_plibs=`echo $zsh_cv_path_python_plibs | sed s/-ltermcap//`
+        ])
+        if test "X$python_DLLLIBRARY" != "X"; then
+            python_INSTSONAME="$python_DLLLIBRARY"
+        fi
+        PYTHON_LIBS="${zsh_cv_path_python_plibs}"
+        if test "${zsh_cv_path_python_pfx}" = "${zsh_cv_path_python_epfx}"; then
+            PYTHON_CFLAGS="-I${zsh_cv_path_python_pfx}/include/python${zsh_cv_python_version} -DPYTHON_HOME=\\\"${zsh_cv_path_python_pfx}\\\""
+        else
+            PYTHON_CFLAGS="-I${zsh_cv_path_python_pfx}/include/python${zsh_cv_python_version} -I${zsh_cv_path_python_epfx}/include/python${zsh_cv_python_version} -DPYTHON_HOME=\\\"${zsh_cv_path_python_pfx}\\\""
+        fi
+        dnl On FreeBSD linking with "-pthread" is required to use threads.
+        dnl _THREAD_SAFE must be used for compiling then.
+        dnl The "-pthread" is added to $LIBS, so that the following check for
+        dnl sigaltstack() will look in libc_r (it's there in libc!).
+        dnl Otherwise, when using GCC, try adding -pthread to $CFLAGS.  GCC
+        dnl will then define target-specific defines, e.g., -D_REENTRANT.
+        dnl Don't do this for Mac OSX, -pthread will generate a warning.
+        AC_MSG_CHECKING([if -pthread should be used])
+        threadsafe_flag=
+        thread_lib=
+        dnl if test "x$MACOSX" != "xyes"; then
+        if test "`(uname) 2>/dev/null`" != Darwin; then
+            test "$GCC" = yes && threadsafe_flag="-pthread"
+            if test "`(uname) 2>/dev/null`" = FreeBSD; then
+                threadsafe_flag="-D_THREAD_SAFE"
+                thread_lib="-pthread"
+            fi
+        fi
+        libs_save=$LIBS
+        if test -n "$threadsafe_flag"; then
+            cflags_save=$CFLAGS
+            CFLAGS="$CFLAGS $threadsafe_flag"
+            LIBS="$LIBS $thread_lib"
+            AC_TRY_LINK(,[ ],
+                        AC_MSG_RESULT(yes); PYTHON_CFLAGS="$PYTHON_CFLAGS $threadsafe_flag",
+                        AC_MSG_RESULT(no); LIBS=$libs_save
+                        )
+            CFLAGS=$cflags_save
+        else
+            AC_MSG_RESULT(no)
+        fi
+
+        dnl Check that compiling a simple program still works with the flags
+        dnl added for Python.
+        AC_MSG_CHECKING([if compile and link flags for Python are sane])
+        cflags_save=$CFLAGS
+        CFLAGS="$CFLAGS $PYTHON_CFLAGS"
+        LIBS="$LIBS $PYTHON_LIBS"
+        AC_TRY_LINK(,[ ],
+                    AC_MSG_RESULT(yes); python_ok=yes,
+                    AC_MSG_RESULT(no: PYTHON DISABLED); python_ok=no)
+        if test x$python_ok != xyes; then
+            CFLAGS=$cflags_save
+            LIBS=$libs_save
+            PYTHON_LIBS=
+            PYTHON_CFLAGS=
+        fi
+    fi
+fi
+
+dnl
 dnl static user lookup
 dnl
 AC_ARG_ENABLE(dynamic-nss,

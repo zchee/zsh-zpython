@@ -1,0 +1,7 @@
+name=zsh/zpython
+link=dynamic
+load=no
+
+autofeatures="b:zpython"
+
+objects="zpython.o"
