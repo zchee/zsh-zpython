@@ -188,6 +188,25 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 
         PyMem_Free(bufstart);
     }
+    else if (PyInt_Check(value)) {
+        if (!setiparam(name, (zlong) PyInt_AsLong(value))) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to assign integer parameter");
+            return NULL;
+        }
+    }
+    else if (PyLong_Check(value)) {
+        if (!setiparam(name, (zlong) PyLong_AsLong(value))) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to assign long parameter");
+            return NULL;
+        }
+    }
+    else if (value == Py_None) {
+        unsetparam (name);
+        if (errflag) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to delete parameter");
+            return NULL;
+        }
+    }
     else {
         PyErr_SetString(PyExc_TypeError, "Cannot assign value of the given type");
         return NULL;
@@ -198,9 +217,6 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 
 /*
  * createparam, createspecialhash
- *
- * getiparam, !!!getnparam, getsparam, getaparam, gethparam
- * gethkparam
  */
 
 #define ZSH_GETLONG_FUNCTION(funcname, var) \
@@ -222,7 +238,7 @@ static struct PyMethodDef ZshMethods[] = {
     {"lines", ZshLines, 0, "Get number of lines"},
     {"subshell", ZshSubshell, 0, "Get subshell recursion depth"},
     {"getvalue", ZshGetValue, 1, "Get parameter value"},
-    {"setvalue", ZshSetValue, 2, "Set parameter value"},
+    {"setvalue", ZshSetValue, 2, "Set parameter value. Use None to unset"},
     {NULL, NULL, 0, NULL},
 };
 
