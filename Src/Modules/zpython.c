@@ -165,7 +165,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         while (i < len)
             buflen += 1 + (imeta(val[i++]) ? 1 : 0);
 
-        buf = PyMem_New(char, buflen);
+        buf = zalloc(buflen * sizeof(char));
         bufstart = buf;
 
         while (len) {
@@ -180,13 +180,11 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         }
         *buf = '\0';
 
-        if (!assignsparam(name, buf, 0)) {
+        if (!setsparam(name, bufstart)) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to assign string to the parameter");
             PyMem_Free(bufstart);
             return NULL;
         }
-
-        PyMem_Free(bufstart);
     }
     else if (PyInt_Check(value)) {
         if (!setiparam(name, (zlong) PyInt_AsLong(value))) {
