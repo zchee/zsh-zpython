@@ -8,11 +8,17 @@
 
 static PyThreadState *saved_python_thread = NULL;
 static PyObject *globals;
+static zlong zpython_subshell;
 
 /**/
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
+    if (zsh_subshell > zpython_subshell) {
+        zpython_subshell = zsh_subshell;
+        PyOS_AfterFork();
+    }
+
     int exit_code = 0;
     PyObject *result;
 
@@ -136,8 +142,6 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 /*
  * createparam, createspecialhash
  *
- * isident for finding ValueErrors
- *
  * getiparam, !!!getnparam, getsparam, getaparam, gethparam
  * gethkparam
  */
@@ -168,6 +172,7 @@ static struct PyMethodDef ZshMethods[] = {
 int
 boot_(Module m)
 {
+    zpython_subshell = zsh_subshell;
     Py_Initialize();
     PyEval_InitThreads();
     Py_InitModule4("zsh", ZshMethods, (char *)NULL, (PyObject *)NULL, PYTHON_API_VERSION);
