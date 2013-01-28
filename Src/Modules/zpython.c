@@ -80,8 +80,24 @@ ZshEval(UNUSED(PyObject *self), PyObject *args)
     Py_RETURN_NONE;
 }
 
+#define ZSH_GETLONG_FUNCTION(funcname, var) \
+static PyObject * \
+Zsh##funcname(UNUSED(PyObject *self), UNUSED(PyObject *args)) \
+{ \
+    return PyInt_FromLong((long) var); \
+}
+
+ZSH_GETLONG_FUNCTION(ExitCode, lastval)
+ZSH_GETLONG_FUNCTION(Columns,  zterm_columns)
+ZSH_GETLONG_FUNCTION(Lines,    zterm_lines)
+ZSH_GETLONG_FUNCTION(Subshell, zsh_subshell)
+
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
+    {"last_exit_code", ZshExitCode, 0, "Get last exit code"},
+    {"columns", ZshColumns, 0, "Get number of columns"},
+    {"lines", ZshLines, 0, "Get number of lines"},
+    {"subshell", ZshSubshell, 0, "Get subshell recursion depth"},
     {NULL, NULL, 0, NULL},
 };
 
