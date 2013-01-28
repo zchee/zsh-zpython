@@ -139,6 +139,63 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
     }
 }
 
+static PyObject *
+ZshSetValue(UNUSED(PyObject *self), PyObject *args)
+{
+    char *name;
+    PyObject *value;
+
+    if(!PyArg_ParseTuple(args, "sO", &name, &value))
+        return NULL;
+
+    if(!isident(name)) {
+        PyErr_SetString(PyExc_ValueError, "Parameter name is not an identifier");
+        return NULL;
+    }
+
+    if (PyString_Check(value)) {
+        char *val, *buf, *bufstart;
+        Py_ssize_t len = 0;
+        Py_ssize_t i = 0;
+        Py_ssize_t buflen = 1;
+
+        if (PyString_AsStringAndSize(value, &val, &len) == -1)
+            return NULL;
+
+        while (i < len)
+            buflen += 1 + (imeta(val[i++]) ? 1 : 0);
+
+        buf = PyMem_New(char, buflen);
+        bufstart = buf;
+
+        while (len) {
+            if (imeta(*val)) {
+                *buf++ = Meta;
+                *buf++ = *val ^ 32;
+            }
+            else
+                *buf++ = *val;
+            val++;
+            len--;
+        }
+        *buf = '\0';
+
+        if (!assignsparam(name, buf, 0)) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to assign string to the parameter");
+            PyMem_Free(bufstart);
+            return NULL;
+        }
+
+        PyMem_Free(bufstart);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Cannot assign value of the given type");
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
 /*
  * createparam, createspecialhash
  *
@@ -165,6 +222,7 @@ static struct PyMethodDef ZshMethods[] = {
     {"lines", ZshLines, 0, "Get number of lines"},
     {"subshell", ZshSubshell, 0, "Get subshell recursion depth"},
     {"getvalue", ZshGetValue, 1, "Get parameter value"},
+    {"setvalue", ZshSetValue, 2, "Set parameter value"},
     {NULL, NULL, 0, NULL},
 };
 
