@@ -87,6 +87,24 @@ ZshEval(UNUSED(PyObject *self), PyObject *args)
 }
 
 static PyObject *
+get_string(char *s)
+{
+    char *buf, *bufstart;
+    PyObject *r;
+    /* No need in \0 byte at the end since we are using
+     * PyString_FromStringAndSize */
+    buf = PyMem_New(char, strlen(s));
+    bufstart = buf;
+    while (*s) {
+        *buf++ = (*s == Meta) ? (*++s ^ 32) : (*s);
+        ++s;
+    }
+    r = PyString_FromStringAndSize(bufstart, (Py_ssize_t)(buf - bufstart));
+    PyMem_Free(bufstart);
+    return r;
+}
+
+static PyObject *
 ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 {
     char *name;
@@ -108,31 +126,48 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 
     switch(PM_TYPE(v->pm->node.flags)) {
         case PM_HASHED:
-        case PM_ARRAY:
             PyErr_SetString(PyExc_NotImplementedError, "Hashes and arrays are currently not supported");
             return NULL;
+        case PM_ARRAY:
+            v->arr = v->pm->gsu.a->getfn(v->pm);
+            if (v->isarr) {
+                char **ss = v->arr;
+                size_t i = 0;
+                PyObject *str;
+                PyObject *r = PyList_New(arrlen(ss));
+                while (*ss) {
+                    str = get_string(*ss++);
+                    if(PyList_SetItem(r, i++, str) == -1) {
+                        Py_DECREF(r);
+                        return NULL;
+                    }
+                }
+                return r;
+            }
+            else {
+                char *s;
+                PyObject *str, *r;
+
+                if (v->start < 0)
+                    v->start += arrlen(v->arr);
+                s = (v->start >= arrlen(v->arr) || v->start < 0) ?
+                    (char *) "" : v->arr[v->start];
+                if(!(str = get_string(s)))
+                    return NULL;
+                r = PyList_New(1);
+                if(PyList_SetItem(r, 0, str) == -1) {
+                    Py_DECREF(r);
+                    return NULL;
+                }
+                return r;
+            }
         case PM_INTEGER:
             return PyLong_FromLong((long) v->pm->gsu.i->getfn(v->pm));
         case PM_EFLOAT:
         case PM_FFLOAT:
             return PyFloat_FromDouble(v->pm->gsu.f->getfn(v->pm));
         case PM_SCALAR:
-            {
-            char *s, *buf, *bufstart;
-            PyObject *r;
-            s = v->pm->gsu.s->getfn(v->pm);
-            /* No need in \0 byte at the end since we are using
-             * PyString_FromStringAndSize */
-            buf = PyMem_New(char, strlen(s));
-            bufstart = buf;
-            while (*s) {
-                *buf++ = (*s == Meta) ? (*++s ^ 32) : (*s);
-                ++s;
-            }
-            r = PyString_FromStringAndSize(bufstart, (Py_ssize_t)(buf - bufstart));
-            PyMem_Free(bufstart);
-            return r;
-            }
+            return get_string(v->pm->gsu.s->getfn(v->pm));
         default:
             PyErr_SetString(PyExc_SystemError, "Parameter has unknown type; should not happen.");
             return NULL;
