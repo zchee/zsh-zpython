@@ -264,9 +264,31 @@ ZSH_GETLONG_FUNCTION(Columns,  zterm_columns)
 ZSH_GETLONG_FUNCTION(Lines,    zterm_lines)
 ZSH_GETLONG_FUNCTION(Subshell, zsh_subshell)
 
+static PyObject *
+ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
+{
+    ssize_t i = 0;
+    PyObject *r = PyList_New(numpipestats);
+    PyObject *num;
+
+    while (i < numpipestats) {
+        if(!(num = PyInt_FromLong(pipestats[i]))) {
+            Py_DECREF(r);
+            return NULL;
+        }
+        if(PyList_SetItem(r, i, num) == -1) {
+            Py_DECREF(r);
+            return NULL;
+        }
+        i++;
+    }
+    return r;
+}
+
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
     {"last_exit_code", ZshExitCode, 0, "Get last exit code"},
+    {"pipestatus", ZshPipeStatus, 0, "Get last pipe status"},
     {"columns", ZshColumns, 0, "Get number of columns"},
     {"lines", ZshLines, 0, "Get number of lines"},
     {"subshell", ZshSubshell, 0, "Get subshell recursion depth"},
