@@ -9,15 +9,22 @@
 static PyThreadState *saved_python_thread = NULL;
 static PyObject *globals;
 static zlong zpython_subshell;
+static PyObject *hashdict = NULL;
+
+static void
+after_fork()
+{
+    zpython_subshell = zsh_subshell;
+    hashdict = NULL;
+    PyOS_AfterFork();
+}
 
 /**/
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
-    if (zsh_subshell > zpython_subshell) {
-        zpython_subshell = zsh_subshell;
-        PyOS_AfterFork();
-    }
+    if (zsh_subshell > zpython_subshell)
+        after_fork();
 
     int exit_code = 0;
     PyObject *result;
@@ -104,6 +111,32 @@ get_string(char *s)
     return r;
 }
 
+static void
+scanhashdict(HashNode hn, UNUSED(int flags))
+{
+    struct value v;
+    PyObject *key, *val;
+
+    if(hashdict == NULL)
+        return;
+
+    v.pm = (Param) hn;
+
+    key = get_string(v.pm->node.nam);
+
+    v.isarr = (PM_TYPE(v.pm->node.flags) & (PM_ARRAY|PM_HASHED));
+    v.flags = 0;
+    v.start = 0;
+    v.end = -1;
+    val = get_string(getstrvalue(&v));
+
+    if(PyDict_SetItem(hashdict, key, val) == -1)
+        hashdict = NULL;
+
+    Py_DECREF(key);
+    Py_DECREF(val);
+}
+
 static PyObject *
 ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 {
@@ -126,8 +159,27 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 
     switch(PM_TYPE(v->pm->node.flags)) {
         case PM_HASHED:
-            PyErr_SetString(PyExc_NotImplementedError, "Hashes and arrays are currently not supported");
-            return NULL;
+            if(hashdict) {
+                PyErr_SetString(PyExc_RuntimeError, "hashdict already used. "
+                        "Do not try to get two hashes simultaneously in separate threads");
+                return NULL;
+            }
+            else {
+                PyObject *hd;
+                HashTable ht;
+
+                hashdict = PyDict_New();
+                hd = hashdict;
+
+                scanhashtable(v->pm->gsu.h->getfn(v->pm), 0, 0, 0, scanhashdict, 0);
+                if (hashdict == NULL) {
+                    Py_DECREF(hd);
+                    return NULL;
+                }
+
+                hashdict = NULL;
+                return hd;
+            }
         case PM_ARRAY:
             v->arr = v->pm->gsu.a->getfn(v->pm);
             if (v->isarr) {
