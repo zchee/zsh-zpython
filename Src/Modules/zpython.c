@@ -303,9 +303,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         valstart = val;
 
 #define FAIL_SETTING_HASH \
-        while (val-- > valstart) \
-            zsfree(*val); \
-        zfree(valstart, len); \
+        freearray(valstart); \
         return NULL
 
         while(PyDict_Next(value, &pos, &pkey, &pval)) {
