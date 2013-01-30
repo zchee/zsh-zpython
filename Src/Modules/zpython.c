@@ -226,6 +226,38 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
     }
 }
 
+static char *
+get_chars(PyObject *str)
+{
+    char *val, *buf, *bufstart;
+    Py_ssize_t len = 0;
+    Py_ssize_t i = 0;
+    Py_ssize_t buflen = 1;
+
+    if (PyString_AsStringAndSize(str, &val, &len) == -1)
+        return NULL;
+
+    while (i < len)
+        buflen += 1 + (imeta(val[i++]) ? 1 : 0);
+
+    buf = zalloc(buflen * sizeof(char));
+    bufstart = buf;
+
+    while (len) {
+        if (imeta(*val)) {
+            *buf++ = Meta;
+            *buf++ = *val ^ 32;
+        }
+        else
+            *buf++ = *val;
+        val++;
+        len--;
+    }
+    *buf = '\0';
+
+    return bufstart;
+}
+
 static PyObject *
 ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 {
@@ -241,35 +273,11 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     }
 
     if (PyString_Check(value)) {
-        char *val, *buf, *bufstart;
-        Py_ssize_t len = 0;
-        Py_ssize_t i = 0;
-        Py_ssize_t buflen = 1;
+        char *s = get_chars(value);
 
-        if (PyString_AsStringAndSize(value, &val, &len) == -1)
-            return NULL;
-
-        while (i < len)
-            buflen += 1 + (imeta(val[i++]) ? 1 : 0);
-
-        buf = zalloc(buflen * sizeof(char));
-        bufstart = buf;
-
-        while (len) {
-            if (imeta(*val)) {
-                *buf++ = Meta;
-                *buf++ = *val ^ 32;
-            }
-            else
-                *buf++ = *val;
-            val++;
-            len--;
-        }
-        *buf = '\0';
-
-        if (!setsparam(name, bufstart)) {
+        if (!setsparam(name, s)) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to assign string to the parameter");
-            PyMem_Free(bufstart);
+            zsfree(s);
             return NULL;
         }
     }
@@ -283,6 +291,39 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         if (!setiparam(name, (zlong) PyLong_AsLong(value))) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to assign long parameter");
             return NULL;
+        }
+    }
+    else if (PyDict_Check(value)) {
+        char **val, **valstart;
+        PyObject *pkey, *pval;
+        Py_ssize_t len, pos = 0;
+
+        len = 2 * PyDict_Size(value) * sizeof(char *) + 1;
+        val = (char **) zalloc(len);
+        valstart = val;
+
+#define FAIL_SETTING_HASH \
+        while (val-- > valstart) \
+            zsfree(*val); \
+        zfree(valstart, len); \
+        return NULL
+
+        while(PyDict_Next(value, &pos, &pkey, &pval)) {
+            if(!PyString_Check(pkey)) {
+                PyErr_SetString(PyExc_TypeError, "Only string keys are allowed");
+                FAIL_SETTING_HASH;
+            }
+            if(!PyString_Check(pval)) {
+                PyErr_SetString(PyExc_TypeError, "Only string values are allowed");
+                FAIL_SETTING_HASH;
+            }
+            *val++ = get_chars(pkey);
+            *val++ = get_chars(pval);
+        }
+        *val = NULL;
+        if(!sethparam(name, valstart)) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to set hash");
+            FAIL_SETTING_HASH;
         }
     }
     else if (value == Py_None) {
