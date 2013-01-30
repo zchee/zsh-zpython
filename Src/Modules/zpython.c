@@ -323,7 +323,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         *val = NULL;
         if(!sethparam(name, valstart)) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to set hash");
-            FAIL_SETTING_HASH;
+            return NULL;
         }
     }
     else if (value == Py_None) {
