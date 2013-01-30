@@ -296,31 +296,65 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     else if (PyDict_Check(value)) {
         char **val, **valstart;
         PyObject *pkey, *pval;
-        Py_ssize_t len, pos = 0;
+        Py_ssize_t arrlen, pos = 0;
 
-        len = 2 * PyDict_Size(value) * sizeof(char *) + 1;
-        val = (char **) zalloc(len);
+        arrlen = (2 * PyDict_Size(value) + 1) * sizeof(char *);
+        val = (char **) zalloc(arrlen);
         valstart = val;
 
-#define FAIL_SETTING_HASH \
+#define FAIL_SETTING_ARRAY \
         freearray(valstart); \
         return NULL
 
         while(PyDict_Next(value, &pos, &pkey, &pval)) {
             if(!PyString_Check(pkey)) {
                 PyErr_SetString(PyExc_TypeError, "Only string keys are allowed");
-                FAIL_SETTING_HASH;
+                FAIL_SETTING_ARRAY;
             }
             if(!PyString_Check(pval)) {
                 PyErr_SetString(PyExc_TypeError, "Only string values are allowed");
-                FAIL_SETTING_HASH;
+                FAIL_SETTING_ARRAY;
             }
             *val++ = get_chars(pkey);
             *val++ = get_chars(pval);
         }
         *val = NULL;
+
         if(!sethparam(name, valstart)) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to set hash");
+            return NULL;
+        }
+    }
+    /* Python’s list have no faster shortcut methods like PyDict_Next above thus
+     * using more abstract protocol */
+    else if (PySequence_Check(value)) {
+        char **val, **valstart;
+        Py_ssize_t len = PySequence_Size(value);
+        Py_ssize_t i = 0;
+
+        if(len == -1) {
+            PyErr_SetString(PyExc_ValueError, "Failed to get sequence size");
+            return NULL;
+        }
+
+        val = (char **) zalloc((len+1) * sizeof(char *));
+        valstart = val;
+
+        while (i < len) {
+            PyObject *item = PySequence_GetItem(value, i);
+
+            if(!PyString_Check(item)) {
+                PyErr_SetString(PyExc_TypeError, "Sequence item is not a string");
+                FAIL_SETTING_ARRAY;
+            }
+
+            *val++ = get_chars(item);
+            i++;
+        }
+        *val = NULL;
+
+        if(!setaparam(name, valstart)) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to set array");
             return NULL;
         }
     }
