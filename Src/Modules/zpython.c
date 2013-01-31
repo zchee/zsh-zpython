@@ -303,7 +303,9 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         valstart = val;
 
 #define FAIL_SETTING_ARRAY \
-        freearray(valstart); \
+        while (val-- > valstart) \
+            zsfree(*val); \
+        zfree(valstart, arrlen); \
         return NULL
 
         while(PyDict_Next(value, &pos, &pkey, &pval)) {
@@ -330,6 +332,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     else if (PySequence_Check(value)) {
         char **val, **valstart;
         Py_ssize_t len = PySequence_Size(value);
+        Py_ssize_t arrlen;
         Py_ssize_t i = 0;
 
         if(len == -1) {
@@ -337,7 +340,8 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
             return NULL;
         }
 
-        val = (char **) zalloc((len+1) * sizeof(char *));
+        arrlen = (len + 1) * sizeof(char *);
+        val = (char **) zalloc(arrlen);
         valstart = val;
 
         while (i < len) {
@@ -372,10 +376,6 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 
     Py_RETURN_NONE;
 }
-
-/*
- * createparam, createspecialhash
- */
 
 #define ZSH_GETLONG_FUNCTION(funcname, var) \
 static PyObject * \
