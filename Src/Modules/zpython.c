@@ -148,7 +148,7 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
         return NULL;
 
     if(!isident(name)) {
-        PyErr_SetString(PyExc_ValueError, "Parameter name is not an identifier");
+        PyErr_SetString(PyExc_KeyError, "Parameter name is not an identifier");
         return NULL;
     }
 
@@ -268,7 +268,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         return NULL;
 
     if(!isident(name)) {
-        PyErr_SetString(PyExc_ValueError, "Parameter name is not an identifier");
+        PyErr_SetString(PyExc_KeyError, "Parameter name is not an identifier");
         return NULL;
     }
 
