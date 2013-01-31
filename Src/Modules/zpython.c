@@ -392,7 +392,7 @@ ZSH_GETLONG_FUNCTION(Subshell, zsh_subshell)
 static PyObject *
 ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
 {
-    ssize_t i = 0;
+    size_t i = 0;
     PyObject *r = PyList_New(numpipestats);
     PyObject *num;
 
