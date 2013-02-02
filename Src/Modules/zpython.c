@@ -17,6 +17,13 @@ struct special_data {
     PyObject *obj;
 };
 
+struct obj_hash_node {
+    HashNode next;
+    char *nam;
+    int flags;
+    PyObject *obj;
+};
+
 static PyThreadState *saved_python_thread = NULL;
 static PyObject *globals;
 static zlong zpython_subshell;
@@ -454,6 +461,176 @@ unset_special_parameter(struct special_data *data)
     zerr errargs; \
     return failval
 
+struct sh_item_data {
+    PyObject *obj;
+    PyObject *item;
+};
+
+static char *
+get_sh_item_value(Param pm)
+{
+    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
+    PyObject *obj = sh_data->obj;
+    PyObject *item = sh_data->item;
+
+    if(PyMapping_HasKey(obj, item)) {
+        PyObject *itemval, *string;
+        char *str;
+
+        if(!(itemval = PyObject_GetItem(obj, item))) {
+            ZFAIL_NOFINISH(("Failed to convert value to string object"), dupstring(""));
+        }
+
+        if(!(string = PyObject_Str(itemval))) {
+            Py_DECREF(itemval);
+            ZFAIL_NOFINISH(("Failed to get value string object"), dupstring(""));
+        }
+
+        if(!(str = get_chars(string))) {
+            Py_DECREF(itemval);
+            Py_DECREF(string);
+            ZFAIL_NOFINISH(("Failed to get string from value string object"), dupstring(""));
+        }
+        Py_DECREF(string);
+        Py_DECREF(itemval);
+        return str;
+    }
+    else
+        return dupstring("");
+}
+
+static char *
+get_sh_item_value_th(Param pm)
+{
+    char *r;
+    PYTHON_INIT;
+    r = get_sh_item_value(pm);
+    PYTHON_FINISH;
+    return r;
+}
+
+static void
+set_sh_item_value(Param pm, char *val)
+{
+    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
+    PyObject *obj = sh_data->obj;
+    PyObject *item = sh_data->item;
+    PyObject *valobj;
+
+    if(!(valobj = get_string(val))) {
+        ZFAIL_NOFINISH(("Failed to get value string object"), );
+    }
+
+    if(PyObject_SetItem(obj, item, valobj) == -1) {
+        Py_DECREF(valobj);
+        ZFAIL_NOFINISH(("Failed to set object"), );
+    }
+    Py_DECREF(valobj);
+}
+
+static void
+set_sh_item_value_th(Param pm, char *val)
+{
+    PYTHON_INIT;
+    set_sh_item_value(pm, val);
+    PYTHON_FINISH;
+}
+
+static void
+unset_sh_item_value(Param pm, UNUSED(int exp))
+{
+    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
+    Py_DECREF(sh_data->obj);
+    Py_DECREF(sh_data->item);
+    zfree(sh_data, sizeof(struct sh_item_data));
+}
+
+static struct gsu_scalar sh_item_gsu =
+{get_sh_item_value, set_sh_item_value, nullunsetfn};
+static struct gsu_scalar sh_item_unset_gsu =
+{get_sh_item_value_th, set_sh_item_value_th, unset_sh_item_value};
+
+static HashNode
+get_sh_item(HashTable ht, const char *key)
+{
+    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
+    PyObject *keyobj, *item, *string;
+    char *str;
+    Param pm;
+    struct sh_item_data *sh_data;
+
+    PYTHON_INIT;
+
+    if(!(keyobj = get_string(key))) {
+        ZFAIL(("Failed to create key %s", key), NULL);
+    }
+
+    pm = (Param) hcalloc(sizeof(struct param));
+    pm->node.nam = dupstring(key);
+    pm->node.flags = PM_SCALAR;
+    pm->gsu.s = &sh_item_unset_gsu;
+
+    Py_INCREF(obj);
+    sh_data = (struct sh_item_data *) zalloc(sizeof(struct sh_item_data));
+    sh_data->obj = obj;
+    sh_data->item = keyobj;
+
+    pm->u.data = (void *)sh_data;
+
+    PYTHON_FINISH;
+
+    return &pm->node;
+}
+
+static void
+scan_special_hash(HashTable ht, ScanFunc func, int flags)
+{
+    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
+    PyObject *iter, *item;
+    HashNode hn;
+    struct param pm;
+
+    memset((void *)&pm, 0, sizeof(struct param));
+    pm.node.flags = PM_SCALAR | PM_READONLY;
+    pm.gsu.s = &sh_item_gsu;
+
+    PYTHON_INIT;
+
+    if(!(iter = PyObject_GetIter(obj))) {
+        ZFAIL(("Failed to get iterator"), );
+    }
+
+    while((item = PyIter_Next(iter))) {
+        PyObject *string;
+        char *str;
+
+        if(!(string = PyObject_Str(item))) {
+            Py_DECREF(iter);
+            Py_DECREF(item);
+            ZFAIL(("Failed to convert key to string object"), );
+        }
+
+        if(!(str = get_chars(string))) {
+            Py_DECREF(string);
+            Py_DECREF(iter);
+            Py_DECREF(item);
+            ZFAIL(("Failed to get string from key string object"), );
+        }
+        Py_DECREF(string);
+        pm.node.nam = str;
+
+        struct sh_item_data sh_data = {obj, item};
+        pm.u.data = (void *) &sh_data;
+
+        func(&pm.node, flags);
+
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+
+    PYTHON_FINISH;
+}
+
 static char *
 get_special_string(Param pm)
 {
@@ -577,6 +754,77 @@ DEFINE_SETTER_FUNC(float, double, ("(d)", val), 0)
 DEFINE_SETTER_FUNC(array, char **, ("(O&)", get_array, val), !val)
 
 static void
+unset_sh_item(HashNode ht, UNUSED(int flags))
+{
+    struct sh_item_data *sh_data = (struct sh_item_data *) ((Param) ht)->u.data;
+    PyMapping_DelItem(sh_data->obj, sh_data->item);
+}
+
+static void
+set_special_hash(Param pm, HashTable ht)
+{
+    int i;
+    HashNode hn;
+    PyObject *obj = ((struct obj_hash_node *)(*pm->u.hash->nodes))->obj;
+    PyObject *keys, *iter, *item;
+
+    if(pm->u.hash == ht)
+        return;
+
+    PYTHON_INIT;
+
+    if(!(keys = PyMapping_Keys(obj))) {
+        ZFAIL(("Failed to get object keys"), );
+    }
+    if(!(iter = PyObject_GetIter(keys))) {
+        ZFAIL(("Failed to get keys iterator"), );
+    }
+    while((item = PyIter_Next(iter))) {
+        if(PyMapping_DelItem(obj, item) == -1) {
+            ZFAIL(("Failed to delete some key"), );
+        }
+        Py_DECREF(item);
+    }
+    Py_DECREF(iter);
+    Py_DECREF(keys);
+
+    for (i = 0; i < ht->hsize; i++)
+        for (hn = ht->nodes[i]; hn; hn = hn->next) {
+            struct value v;
+            char *val;
+            PyObject *valobj, *keyobj;
+
+            v.isarr = v.flags = v.start = 0;
+            v.end = -1;
+            v.arr = NULL;
+            v.pm = (Param) hn;
+
+            val = getstrvalue(&v);
+            if(!val) {
+                ZFAIL(("Failed to get string value"), );
+            }
+
+            if(!(valobj = get_string(val))) {
+                ZFAIL(("Failed to convert value \"%s\" to string object while processing key", val, hn->nam), );
+            }
+            if(!(keyobj = get_string(hn->nam))) {
+                Py_DECREF(valobj);
+                ZFAIL(("Failed to convert key \"%s\" to string object", hn->nam), );
+            }
+
+            if(PyObject_SetItem(obj, keyobj, valobj) == -1) {
+                Py_DECREF(valobj);
+                Py_DECREF(keyobj);
+                ZFAIL(("Failed to set key %s", hn->nam), );
+            }
+
+            Py_DECREF(valobj);
+            Py_DECREF(keyobj);
+        }
+    PYTHON_FINISH;
+}
+
+static void
 unsetfn(Param pm, int exp)
 {
     unset_special_parameter((struct special_data *) pm->u.data);
@@ -591,183 +839,8 @@ static const struct gsu_float special_float_gsu =
 {get_special_float, set_special_float, unsetfn};
 static const struct gsu_array special_array_gsu =
 {get_special_array, set_special_array, stdunsetfn};
-
-struct obj_hash_node {
-    HashNode next;
-    char *nam;
-    int flags;
-    PyObject *obj;
-};
-
-struct sh_item_data {
-    PyObject *obj;
-    PyObject *item;
-};
-
-static char *
-get_sh_item_value(Param pm)
-{
-    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
-    PyObject *obj = sh_data->obj;
-    PyObject *item = sh_data->item;
-
-    if(PyMapping_Check(obj) && PyMapping_HasKey(obj, item)) {
-        PyObject *itemval, *string;
-        char *str;
-
-        if(!(itemval = PyObject_GetItem(obj, item))) {
-            ZFAIL_NOFINISH(("Failed to convert value to string object"), dupstring(""));
-        }
-
-        if(!(string = PyObject_Str(itemval))) {
-            Py_DECREF(itemval);
-            ZFAIL_NOFINISH(("Failed to get value string object"), dupstring(""));
-        }
-
-        if(!(str = get_chars(string))) {
-            Py_DECREF(itemval);
-            Py_DECREF(string);
-            ZFAIL_NOFINISH(("Failed to get string from value string object"), dupstring(""));
-        }
-        Py_DECREF(string);
-        Py_DECREF(itemval);
-        return str;
-    }
-    else
-        return dupstring("");
-}
-
-static char *
-get_sh_item_value_th(Param pm)
-{
-    char *r;
-    PYTHON_INIT;
-    r = get_sh_item_value(pm);
-    PYTHON_FINISH;
-    return r;
-}
-
-static void
-set_sh_item_value(Param pm, char *val)
-{
-    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
-    PyObject *obj = sh_data->obj;
-    PyObject *item = sh_data->item;
-    PyObject *valobj;
-
-    if(!(valobj = get_string(val))) {
-        ZFAIL_NOFINISH(("Failed to get value string object"), );
-    }
-
-    if(PyObject_SetItem(obj, item, valobj) == -1) {
-        Py_DECREF(valobj);
-        ZFAIL_NOFINISH(("Failed to set object"), );
-    }
-    Py_DECREF(valobj);
-}
-
-static void
-set_sh_item_value_th(Param pm, char *val)
-{
-    PYTHON_INIT;
-    set_sh_item_value(pm, val);
-    PYTHON_FINISH;
-}
-
-static void
-unset_sh_item_value(Param pm, UNUSED(int exp))
-{
-    struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
-    Py_DECREF(sh_data->obj);
-    Py_DECREF(sh_data->item);
-    zfree(sh_data, sizeof(struct sh_item_data));
-}
-
-static struct gsu_scalar sh_item_gsu =
-{get_sh_item_value, set_sh_item_value, nullunsetfn};
-static struct gsu_scalar sh_item_unset_gsu =
-{get_sh_item_value_th, set_sh_item_value_th, unset_sh_item_value};
-
-static HashNode
-get_sh_item(HashTable ht, const char *key)
-{
-    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
-    PyObject *keyobj, *item, *string;
-    char *str;
-    Param pm;
-    struct sh_item_data *sh_data;
-
-    PYTHON_INIT;
-
-    if(!(keyobj = get_string(key))) {
-        ZFAIL(("Failed to create key %s", key), NULL);
-    }
-
-    pm = (Param) hcalloc(sizeof(struct param));
-    pm->node.nam = dupstring(key);
-    pm->node.flags = PM_SCALAR;
-    pm->gsu.s = &sh_item_unset_gsu;
-
-    Py_INCREF(obj);
-    sh_data = (struct sh_item_data *) zalloc(sizeof(struct sh_item_data));
-    sh_data->obj = obj;
-    sh_data->item = keyobj;
-
-    pm->u.data = (void *)sh_data;
-
-    PYTHON_FINISH;
-
-    return &pm->node;
-}
-
-static void
-scan_special_hash(HashTable ht, ScanFunc func, int flags)
-{
-    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
-    PyObject *iter, *item;
-    HashNode hn;
-    struct param pm;
-
-    PYTHON_INIT;
-
-    memset((void *)&pm, 0, sizeof(struct param));
-    pm.node.flags = PM_SCALAR | PM_READONLY;
-    pm.gsu.s = &sh_item_gsu;
-
-    if(!(iter = PyObject_GetIter(obj))) {
-        ZFAIL(("Failed to get iterator"), );
-    }
-
-    while((item = PyIter_Next(iter))) {
-        PyObject *string;
-        char *str;
-
-        if(!(string = PyObject_Str(item))) {
-            Py_DECREF(iter);
-            Py_DECREF(item);
-            ZFAIL(("Failed to convert key to string object"), );
-        }
-
-        if(!(str = get_chars(string))) {
-            Py_DECREF(string);
-            Py_DECREF(iter);
-            Py_DECREF(item);
-            ZFAIL(("Failed to get string from key string object"), );
-        }
-        Py_DECREF(string);
-        pm.node.nam = str;
-
-        struct sh_item_data sh_data = {obj, item};
-        pm.u.data = (void *) &sh_data;
-
-        func(&pm.node, flags);
-
-        Py_DECREF(item);
-    }
-    Py_DECREF(iter);
-
-    PYTHON_FINISH;
-}
+static const struct gsu_hash special_hash_gsu =
+{hashgetfn, set_special_hash, stdunsetfn};
 
 static int
 check_special_name(char *name)
@@ -805,6 +878,31 @@ set_special_parameter(PyObject *args, int type)
 
     if(check_special_name(name))
         return NULL;
+
+    switch(type) {
+        case PM_SCALAR:
+            break;
+        case PM_INTEGER:
+        case PM_EFLOAT:
+        case PM_FFLOAT:
+            if(!PyNumber_Check(obj)) {
+                PyErr_SetString(PyExc_TypeError, "Object must implement numeric protocol");
+                return NULL;
+            }
+            break;
+        case PM_ARRAY:
+            if(!PySequence_Check(obj)) {
+                PyErr_SetString(PyExc_TypeError, "Object must implement sequence protocol");
+                return NULL;
+            }
+            break;
+        case PM_HASHED:
+            if(!PyMapping_Check(obj)) {
+                PyErr_SetString(PyExc_TypeError, "Object must implement mapping protocol");
+                return NULL;
+            }
+            break;
+    }
 
     if(type == PM_HASHED) {
         if(!(pm = createspecialhash(name, get_sh_item,
@@ -862,6 +960,7 @@ set_special_parameter(PyObject *args, int type)
                 ht->nodes = zshcalloc(1 * sizeof(HashNode));
                 ht->hsize = 1;
                 *ht->nodes = (struct hashnode *) ohn;
+                pm->gsu.h = &special_hash_gsu;
                 break;
             }
     }
@@ -929,9 +1028,11 @@ static struct PyMethodDef ZshMethods[] = {
         "Define hash parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
-        "Second argument is value object. It must implement __getitem__ and iterator protocol,\n"
-        "  iterator must return keys, __getitem__ must be able to work with string objects,\n"
-        "  each item must have str type. __setitem__ will be used to set hash items"},
+        "Second argument is value object. It must implement mapping protocol,\n"
+        "  it may be iterable (in this case iterator must return keys),\n"
+        "  __getitem__ must be able to work with string objects,\n"
+        "  each item must have str type.\n"
+        "  __setitem__ will be used to set hash items"},
     {NULL, NULL, 0, NULL},
 };
 
