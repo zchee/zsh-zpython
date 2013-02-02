@@ -124,6 +124,45 @@ scanhashdict(HashNode hn, UNUSED(int flags))
 }
 
 static PyObject *
+get_array(char **ss)
+{
+    PyObject *r = PyList_New(arrlen(ss));
+    size_t i = 0;
+    while (*ss) {
+        PyObject *str = get_string(*ss++);
+        if(PyList_SetItem(r, i++, str) == -1) {
+            Py_DECREF(r);
+            return NULL;
+        }
+    }
+    return r;
+}
+
+static PyObject *
+get_hash(HashTable ht)
+{
+    PyObject *hd;
+
+    if(hashdict) {
+        PyErr_SetString(PyExc_RuntimeError, "hashdict already used. "
+                "Do not try to get two hashes simultaneously in separate threads");
+        return NULL;
+    }
+
+    hashdict = PyDict_New();
+    hd = hashdict;
+
+    scanhashtable(ht, 0, 0, 0, scanhashdict, 0);
+    if (hashdict == NULL) {
+        Py_DECREF(hd);
+        return NULL;
+    }
+
+    hashdict = NULL;
+    return hd;
+}
+
+static PyObject *
 ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 {
     char *name;
@@ -145,42 +184,11 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 
     switch(PM_TYPE(v->pm->node.flags)) {
         case PM_HASHED:
-            if(hashdict) {
-                PyErr_SetString(PyExc_RuntimeError, "hashdict already used. "
-                        "Do not try to get two hashes simultaneously in separate threads");
-                return NULL;
-            }
-            else {
-                PyObject *hd;
-                HashTable ht;
-
-                hashdict = PyDict_New();
-                hd = hashdict;
-
-                scanhashtable(v->pm->gsu.h->getfn(v->pm), 0, 0, 0, scanhashdict, 0);
-                if (hashdict == NULL) {
-                    Py_DECREF(hd);
-                    return NULL;
-                }
-
-                hashdict = NULL;
-                return hd;
-            }
+            return get_hash(v->pm->gsu.h->getfn(v->pm));
         case PM_ARRAY:
             v->arr = v->pm->gsu.a->getfn(v->pm);
             if (v->isarr) {
-                char **ss = v->arr;
-                size_t i = 0;
-                PyObject *str;
-                PyObject *r = PyList_New(arrlen(ss));
-                while (*ss) {
-                    str = get_string(*ss++);
-                    if(PyList_SetItem(r, i++, str) == -1) {
-                        Py_DECREF(r);
-                        return NULL;
-                    }
-                }
-                return r;
+                return get_array(v->arr);
             }
             else {
                 char *s;
@@ -244,6 +252,45 @@ get_chars(PyObject *str)
     return bufstart;
 }
 
+#define FAIL_SETTING_ARRAY \
+        while (val-- > valstart) \
+            zsfree(*val); \
+        zfree(valstart, arrlen); \
+        return NULL
+
+static char **
+get_chars_array(PyObject *seq)
+{
+    char **val, **valstart;
+    Py_ssize_t len = PySequence_Size(seq);
+    Py_ssize_t arrlen;
+    Py_ssize_t i = 0;
+
+    if(len == -1) {
+        PyErr_SetString(PyExc_ValueError, "Failed to get sequence size");
+        return NULL;
+    }
+
+    arrlen = (len + 1) * sizeof(char *);
+    val = (char **) zalloc(arrlen);
+    valstart = val;
+
+    while (i < len) {
+        PyObject *item = PySequence_GetItem(seq, i);
+
+        if(!PyString_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "Sequence item is not a string");
+            FAIL_SETTING_ARRAY;
+        }
+
+        *val++ = get_chars(item);
+        i++;
+    }
+    *val = NULL;
+
+    return valstart;
+}
+
 static PyObject *
 ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 {
@@ -288,12 +335,6 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         val = (char **) zalloc(arrlen);
         valstart = val;
 
-#define FAIL_SETTING_ARRAY \
-        while (val-- > valstart) \
-            zsfree(*val); \
-        zfree(valstart, arrlen); \
-        return NULL
-
         while(PyDict_Next(value, &pos, &pkey, &pval)) {
             if(!PyString_Check(pkey)) {
                 PyErr_SetString(PyExc_TypeError, "Only string keys are allowed");
@@ -316,34 +357,12 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     /* Python’s list have no faster shortcut methods like PyDict_Next above thus
      * using more abstract protocol */
     else if (PySequence_Check(value)) {
-        char **val, **valstart;
-        Py_ssize_t len = PySequence_Size(value);
-        Py_ssize_t arrlen;
-        Py_ssize_t i = 0;
+        char **ss = get_chars_array(value);
 
-        if(len == -1) {
-            PyErr_SetString(PyExc_ValueError, "Failed to get sequence size");
+        if(!ss)
             return NULL;
-        }
 
-        arrlen = (len + 1) * sizeof(char *);
-        val = (char **) zalloc(arrlen);
-        valstart = val;
-
-        while (i < len) {
-            PyObject *item = PySequence_GetItem(value, i);
-
-            if(!PyString_Check(item)) {
-                PyErr_SetString(PyExc_TypeError, "Sequence item is not a string");
-                FAIL_SETTING_ARRAY;
-            }
-
-            *val++ = get_chars(item);
-            i++;
-        }
-        *val = NULL;
-
-        if(!setaparam(name, valstart)) {
+        if(!setaparam(name, ss)) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to set array");
             return NULL;
         }
@@ -411,58 +430,144 @@ unset_magic_parameter(struct magic_data *data)
     PyMem_Free(data);
 }
 
+
+#define ZFAIL(message, failval) \
+    PyErr_PrintEx(0); \
+    zerr(message, pm->node.nam); \
+    PYTHON_FINISH; \
+    return failval
+
 static char *
 get_magic_string(Param pm)
 {
-    PyObject *string;
+    PyObject *robj;
+    char *r;
 
     PYTHON_INIT;
 
-    string = PyObject_Str(((struct magic_data *)pm->u.data)->obj);
-    if(!string) {
-        PyErr_PrintEx(0);
-        zerr("Failed to get value for parameter %s", pm->node.nam);
-        PYTHON_FINISH;
-        return NULL;
+    robj = PyObject_Str(((struct magic_data *)pm->u.data)->obj);
+    if(!robj) {
+        ZFAIL("Failed to get value for parameter %s", NULL);
     }
 
-    char *r = get_chars(string);
-    Py_DECREF(string);
+    r = get_chars(robj);
+    if(!r) {
+        ZFAIL("Failed to transform value for parameter %s", NULL);
+    }
+
+    Py_DECREF(robj);
 
     PYTHON_FINISH;
 
     return r;
 }
 
-static void
-set_magic_string(Param pm, char *str)
+static zlong
+get_magic_integer(Param pm)
 {
-    PyObject *r, *args;
+    PyObject *robj;
+    zlong r;
 
     PYTHON_INIT;
 
-    if(!str) {
-        unset_magic_parameter((struct magic_data *) pm->u.data);
-
-        PYTHON_FINISH;
-        return;
+    robj = PyNumber_Long(((struct magic_data *)pm->u.data)->obj);
+    if(!robj) {
+        ZFAIL("Failed to get value for parameter %s", 0);
     }
 
-    args = Py_BuildValue("(O&)", get_string, str);
-    r = PyObject_CallObject(((struct magic_data *) pm->u.data)->obj, args);
-    if(!r) {
-        PyErr_PrintEx(0);
-        zerr("Failed to assign value for parameter %s", pm->node.nam);
-        PYTHON_FINISH;
-        return;
-    }
-    Py_DECREF(r);
+    r = PyLong_AsLong(robj);
+
+    Py_DECREF(robj);
 
     PYTHON_FINISH;
+
+    return r;
 }
+
+static double
+get_magic_float(Param pm)
+{
+    PyObject *robj;
+    float r;
+
+    PYTHON_INIT;
+
+    robj = PyNumber_Float(((struct magic_data *)pm->u.data)->obj);
+    if(!robj) {
+        ZFAIL("Failed to get value for parameter %s", 0);
+    }
+
+    r = PyFloat_AsDouble(robj);
+
+    Py_DECREF(robj);
+
+    PYTHON_FINISH;
+
+    return r;
+}
+
+static char **
+get_magic_array(Param pm)
+{
+    PyObject *robj;
+    char **r;
+
+    PYTHON_INIT;
+
+    robj = ((struct magic_data *)pm->u.data)->obj;
+
+    r = get_chars_array(robj);
+    if(!r) {
+        ZFAIL("Failed to transform value for parameter %s", NULL);
+    }
+
+    PYTHON_FINISH;
+
+    return r;
+}
+
+#define DEFINE_SETTER_FUNC(name, stype, stransargs, unsetcond) \
+static void \
+set_magic_##name(Param pm, stype val) \
+{ \
+    PyObject *r, *args; \
+ \
+    PYTHON_INIT; \
+ \
+    if(unsetcond) { \
+        unset_magic_parameter((struct magic_data *) pm->u.data); \
+ \
+        PYTHON_FINISH; \
+        return; \
+    } \
+ \
+    args = Py_BuildValue stransargs; \
+    r = PyObject_CallObject(((struct magic_data *) pm->u.data)->obj, args); \
+    if(!r) { \
+        PyErr_PrintEx(0); \
+        zerr("Failed to assign value for parameter %s", pm->node.nam); \
+        PYTHON_FINISH; \
+        return; \
+    } \
+    Py_DECREF(r); \
+ \
+    PYTHON_FINISH; \
+}
+
+DEFINE_SETTER_FUNC(string, char *, ("(O&)", get_string, val), !val)
+DEFINE_SETTER_FUNC(integer, zlong, ("(L)", (long long) val), 0)
+DEFINE_SETTER_FUNC(float, double, ("(d)", val), 0)
+DEFINE_SETTER_FUNC(array, char **, ("(O&)", get_array, val), !val)
 
 static const struct gsu_scalar magic_string_gsu =
 {get_magic_string, set_magic_string, stdunsetfn};
+/* FIXME no stdunsetfn for integer and float values */
+static const struct gsu_integer magic_integer_gsu =
+{get_magic_integer, set_magic_integer, stdunsetfn};
+static const struct gsu_float magic_float_gsu =
+{get_magic_float, set_magic_float, stdunsetfn};
+static const struct gsu_array magic_array_gsu =
+{get_magic_array, set_magic_array, stdunsetfn};
 
 static int
 check_magic_name(char *name)
@@ -484,12 +589,12 @@ check_magic_name(char *name)
 }
 
 static PyObject *
-ZshSetMagicString(UNUSED(PyObject *self), PyObject *args)
+set_magic_parameter(PyObject *args, int type)
 {
     char *name;
     PyObject *obj;
     Param pm;
-    int flags = PM_SCALAR;
+    int flags = type;
     struct magic_data *data;
 
     if(!PyArg_ParseTuple(args, "sO", &name, &obj))
@@ -521,10 +626,37 @@ ZshSetMagicString(UNUSED(PyObject *self), PyObject *args)
 
     pm->level = 0;
     pm->u.data = data;
-    pm->gsu.s = &magic_string_gsu;
+
+    switch(type) {
+        case PM_SCALAR:
+            pm->gsu.s = &magic_string_gsu;
+            break;
+        case PM_INTEGER:
+            pm->gsu.i = &magic_integer_gsu;
+            break;
+        case PM_EFLOAT:
+        case PM_FFLOAT:
+            pm->gsu.f = &magic_float_gsu;
+            break;
+        case PM_ARRAY:
+            pm->gsu.a = &magic_array_gsu;
+            break;
+    }
 
     Py_RETURN_NONE;
 }
+
+#define DEFINE_MAGIC_SETTER_FUNC(name, type) \
+static PyObject * \
+ZshSetMagic##name(UNUSED(PyObject *self), PyObject *args) \
+{ \
+    return set_magic_parameter(args, type); \
+}
+
+DEFINE_MAGIC_SETTER_FUNC(String, PM_SCALAR)
+DEFINE_MAGIC_SETTER_FUNC(Integer, PM_INTEGER)
+DEFINE_MAGIC_SETTER_FUNC(Float, PM_EFLOAT)
+DEFINE_MAGIC_SETTER_FUNC(Array, PM_ARRAY)
 
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
@@ -540,13 +672,35 @@ static struct PyMethodDef ZshMethods[] = {
         "       RuntimeError if zsh set?param/unsetparam function failed,\n"
         "       ValueError   if sequence item or dictionary key or value are not str\n"
         "                       or sequence size is not known."},
-    {"define_magic_string", ZshSetMagicString, 2,
+    {"set_magic_string", ZshSetMagicString, 2,
         "Define scalar (string) parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
         "Second argument is value object. Its __str__ method will be used to get\n"
         "  resulting string when parameter is accessed in zsh, __call__ method will be used\n"
         "  to set value. If object is not callable then parameter will be considered readonly"},
+    {"set_magic_integer", ZshSetMagicInteger, 2,
+        "Define integer parameter.\n"
+        "First argument is parameter name, it must start with zpython (case is ignored).\n"
+        "  Parameter with given name must not exist.\n"
+        "Second argument is value object. It will be coerced to long integer,\n"
+        "  __call__ method will be used to set value. If object is not callable\n"
+        "  then parameter will be considered readonly"},
+    {"set_magic_float", ZshSetMagicFloat, 2,
+        "Define floating point parameter.\n"
+        "First argument is parameter name, it must start with zpython (case is ignored).\n"
+        "  Parameter with given name must not exist.\n"
+        "Second argument is value object. It will be coerced to float,\n"
+        "  __call__ method will be used to set value. If object is not callable\n"
+        "  then parameter will be considered readonly"},
+    {"set_magic_array", ZshSetMagicArray, 2,
+        "Define array parameter.\n"
+        "First argument is parameter name, it must start with zpython (case is ignored).\n"
+        "  Parameter with given name must not exist.\n"
+        "Second argument is value object. It must implement sequence protocol,\n"
+        "  each item in sequence must have str type, __call__ method will be used\n"
+        "  to set value. If object is not callable then parameter will be\n"
+        "  considered readonly"},
     {NULL, NULL, 0, NULL},
 };
 
