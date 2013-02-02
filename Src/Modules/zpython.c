@@ -6,10 +6,24 @@
 #define PYTHON_RESTORE_THREAD PyEval_RestoreThread(saved_python_thread); \
                               saved_python_thread = NULL
 
+struct specialparam {
+    char *name;
+    struct specialparam *next;
+};
+
+struct magic_data {
+    struct specialparam *sp;
+    struct specialparam *sp_prev;
+    PyObject *obj;
+};
+
 static PyThreadState *saved_python_thread = NULL;
 static PyObject *globals;
 static zlong zpython_subshell;
 static PyObject *hashdict = NULL;
+static struct specialparam *first_assigned_param = NULL;
+static struct specialparam *last_assigned_param = NULL;
+
 
 static void
 after_fork()
@@ -19,17 +33,23 @@ after_fork()
     PyOS_AfterFork();
 }
 
+#define PYTHON_INIT \
+    if (zsh_subshell > zpython_subshell) \
+        after_fork(); \
+ \
+    int exit_code = 0; \
+    PyObject *result; \
+ \
+    PYTHON_RESTORE_THREAD
+
+#define PYTHON_FINISH \
+    PYTHON_SAVE_THREAD
+
 /**/
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
-    if (zsh_subshell > zpython_subshell)
-        after_fork();
-
-    int exit_code = 0;
-    PyObject *result;
-
-    PYTHON_RESTORE_THREAD;
+    PYTHON_INIT;
 
     result = PyRun_String(*args, Py_file_input, globals, globals);
     if(result == NULL)
@@ -42,7 +62,7 @@ do_zpython(char *nam, char **args, Options ops, int func)
         Py_DECREF(result);
     PyErr_Clear();
 
-    PYTHON_SAVE_THREAD;
+    PYTHON_FINISH;
     return exit_code;
 }
 
@@ -363,7 +383,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         }
     }
     else if (value == Py_None) {
-        unsetparam (name);
+        unsetparam(name);
         if (errflag) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to delete parameter");
             return NULL;
@@ -410,15 +430,156 @@ ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
     return r;
 }
 
+static void
+unset_magic_parameter(Param pm)
+{
+    struct magic_data *data = (struct magic_data *) pm->u.data;
+
+    Py_DECREF(data->obj);
+
+    if(data->sp_prev)
+        data->sp_prev->next = data->sp->next;
+    else
+        first_assigned_param = data->sp->next;
+    if(!data->sp->next)
+        last_assigned_param = data->sp_prev;
+    PyMem_Free(data->sp);
+}
+
+static char *
+get_magic_string(Param pm)
+{
+    PyObject *string;
+
+    PYTHON_INIT;
+
+    string = PyObject_Str(((struct magic_data *)pm->u.data)->obj);
+    if(!string) {
+        PyErr_PrintEx(0);
+        zerr("Failed to get value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return NULL;
+    }
+
+    char *r = get_chars(string);
+    Py_DECREF(string);
+
+    PYTHON_FINISH;
+
+    return r;
+}
+
+static void
+set_magic_string(Param pm, char *str)
+{
+    PyObject *r, *args;
+
+    PYTHON_INIT;
+
+    if(!str) {
+        unset_magic_parameter(pm);
+
+        PYTHON_FINISH;
+        return;
+    }
+
+    args = Py_BuildValue("(O&)", get_string, str);
+    r = PyObject_CallObject(((struct magic_data *) pm->u.data)->obj, args);
+    if(!r) {
+        PyErr_PrintEx(0);
+        zerr("Failed to assign value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return;
+    }
+    Py_DECREF(r);
+
+    PYTHON_FINISH;
+}
+
+static const struct gsu_scalar magic_string_gsu =
+{get_magic_string, set_magic_string, stdunsetfn};
+
+static int
+check_magic_name(char *name)
+{
+    /* Needing strncasecmp, but the one that ignores locale */
+    if(!(          (name[0] == 'z' || name[0] == 'Z')
+                && (name[1] == 'p' || name[1] == 'P')
+                && (name[2] == 'y' || name[2] == 'Y')
+                && (name[3] == 't' || name[3] == 'T')
+                && (name[4] == 'h' || name[4] == 'H')
+                && (name[5] == 'o' || name[4] == 'O')
+                && (name[6] == 'n' || name[4] == 'N')
+       ) || !isident(name))
+    {
+        PyErr_SetString(PyExc_KeyError, "Invalid magic identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
+        return 1;
+    }
+    return 0;
+}
+
+static PyObject *
+ZshSetMagicString(UNUSED(PyObject *self), PyObject *args)
+{
+    char *name;
+    PyObject *obj;
+    Param pm;
+    int flags = PM_SCALAR;
+    struct magic_data *data;
+
+    if(!PyArg_ParseTuple(args, "sO", &name, &obj))
+        return NULL;
+
+    if(!PyCallable_Check(obj))
+        flags |= PM_READONLY;
+
+    if(check_magic_name(name))
+        return NULL;
+
+    if(!(pm = createparam(name, flags))) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to get parameter");
+        return NULL;
+    }
+
+    data = PyMem_New(struct magic_data, 1);
+    data->sp_prev = last_assigned_param;
+    data->sp = PyMem_New(struct specialparam, 1);
+    if(last_assigned_param)
+        last_assigned_param->next = data->sp;
+    else
+        first_assigned_param = data->sp;
+    last_assigned_param = data->sp;
+    data->obj = obj;
+    Py_INCREF(obj);
+
+    pm->level = 0;
+    pm->u.data = data;
+    pm->gsu.s = &magic_string_gsu;
+
+    Py_RETURN_NONE;
+}
+
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
-    {"last_exit_code", ZshExitCode, 0, "Get last exit code"},
-    {"pipestatus", ZshPipeStatus, 0, "Get last pipe status"},
-    {"columns", ZshColumns, 0, "Get number of columns"},
-    {"lines", ZshLines, 0, "Get number of lines"},
-    {"subshell", ZshSubshell, 0, "Get subshell recursion depth"},
-    {"getvalue", ZshGetValue, 1, "Get parameter value"},
-    {"setvalue", ZshSetValue, 2, "Set parameter value. Use None to unset"},
+    {"last_exit_code", ZshExitCode, 0, "Get last exit code. Returns an int"},
+    {"pipestatus", ZshPipeStatus, 0, "Get last pipe status. Returns a list of int"},
+    {"columns", ZshColumns, 0, "Get number of columns. Returns an int"},
+    {"lines", ZshLines, 0, "Get number of lines. Returns an int"},
+    {"subshell", ZshSubshell, 0, "Get subshell recursion depth. Returns an int"},
+    {"getvalue", ZshGetValue, 1, "Get parameter value. Returns an int"},
+    {"setvalue", ZshSetValue, 2,
+        "Set parameter value. Use None to unset.\n"
+        "Throws KeyError     if identifier is invalid,\n"
+        "       RuntimeError if zsh set?param/unsetparam function failed,\n"
+        "       ValueError   if sequence item or dictionary key or value are not str\n"
+        "                       or sequence size is not known."},
+    {"define_magic_string", ZshSetMagicString, 2,
+        "Define scalar (string) parameter.\n"
+        "First argument is parameter name, it must start with zpython (case is ignored).\n"
+        "  Parameter with given name must not exist.\n"
+        "Second argument is value object. Its __str__ method will be used to get\n"
+        "  resulting string when parameter is accessed in zsh, __call__ method will be used\n"
+        "  to set value. If object is not callable then parameter will be considered readonly"},
     {NULL, NULL, 0, NULL},
 };
 
