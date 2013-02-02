@@ -40,11 +40,12 @@ after_fork()
     PyOS_AfterFork();
 }
 
-#define PYTHON_INIT \
-    if (zsh_subshell > zpython_subshell) \
-        after_fork(); \
+#define PYTHON_INIT(failval) \
+    if (zsh_subshell > zpython_subshell) { \
+        zerr("Launching python in subshells is not supported"); \
+        return failval; \
+    } \
  \
-    int exit_code = 0; \
     PyObject *result; \
  \
     PYTHON_RESTORE_THREAD
@@ -56,14 +57,17 @@ after_fork()
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
-    PYTHON_INIT;
+    PYTHON_INIT(2);
+
+    int exit_code = 0;
 
     result = PyRun_String(*args, Py_file_input, globals, globals);
     if(result == NULL)
     {
-        if(PyErr_Occurred())
+        if(PyErr_Occurred()) {
             PyErr_PrintEx(0);
-        exit_code = 1;
+            exit_code = 1;
+        }
     }
     else
         Py_DECREF(result);
@@ -503,7 +507,7 @@ static char *
 get_sh_item_value_th(Param pm)
 {
     char *r;
-    PYTHON_INIT;
+    PYTHON_INIT(dupstring(""));
     r = get_sh_item_value(pm);
     PYTHON_FINISH;
     return r;
@@ -531,7 +535,7 @@ set_sh_item_value(Param pm, char *val)
 static void
 set_sh_item_value_th(Param pm, char *val)
 {
-    PYTHON_INIT;
+    PYTHON_INIT();
     set_sh_item_value(pm, val);
     PYTHON_FINISH;
 }
@@ -559,13 +563,13 @@ get_sh_item(HashTable ht, const char *key)
     Param pm;
     struct sh_item_data *sh_data;
 
-    PYTHON_INIT;
+    PYTHON_INIT(NULL);
 
     if(!(keyobj = get_string(key))) {
         ZFAIL(("Failed to create key %s", key), NULL);
     }
 
-    pm = (Param) hcalloc(sizeof(struct param));
+    pm = (Param) zshcalloc(sizeof(struct param));
     pm->node.nam = dupstring(key);
     pm->node.flags = PM_SCALAR;
     pm->gsu.s = &sh_item_unset_gsu;
@@ -594,7 +598,7 @@ scan_special_hash(HashTable ht, ScanFunc func, int flags)
     pm.node.flags = PM_SCALAR | PM_READONLY;
     pm.gsu.s = &sh_item_gsu;
 
-    PYTHON_INIT;
+    PYTHON_INIT();
 
     if(!(iter = PyObject_GetIter(obj))) {
         ZFAIL(("Failed to get iterator"), );
@@ -637,7 +641,7 @@ get_special_string(Param pm)
     PyObject *robj;
     char *r;
 
-    PYTHON_INIT;
+    PYTHON_INIT(dupstring(""));
 
     robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
@@ -662,7 +666,7 @@ get_special_integer(Param pm)
     PyObject *robj;
     zlong r;
 
-    PYTHON_INIT;
+    PYTHON_INIT(0);
 
     robj = PyNumber_Long(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
@@ -684,7 +688,7 @@ get_special_float(Param pm)
     PyObject *robj;
     float r;
 
-    PYTHON_INIT;
+    PYTHON_INIT(0.0);
 
     robj = PyNumber_Float(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
@@ -706,13 +710,13 @@ get_special_array(Param pm)
     PyObject *robj;
     char **r;
 
-    PYTHON_INIT;
+    PYTHON_INIT(zshcalloc(sizeof(char **)));
 
     robj = ((struct special_data *)pm->u.data)->obj;
 
     r = get_chars_array(robj);
     if(!r) {
-        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), hcalloc(sizeof(char **)));
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), zshcalloc(sizeof(char **)));
     }
 
     PYTHON_FINISH;
@@ -726,7 +730,7 @@ set_special_##name(Param pm, stype val) \
 { \
     PyObject *r, *args; \
  \
-    PYTHON_INIT; \
+    PYTHON_INIT(); \
  \
     if(unsetcond) { \
         unset_special_parameter((struct special_data *) pm->u.data); \
@@ -771,7 +775,7 @@ set_special_hash(Param pm, HashTable ht)
     if(pm->u.hash == ht)
         return;
 
-    PYTHON_INIT;
+    PYTHON_INIT();
 
     if(!ht) {
         Py_DECREF(obj);
