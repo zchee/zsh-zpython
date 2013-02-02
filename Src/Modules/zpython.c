@@ -431,10 +431,8 @@ ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
 }
 
 static void
-unset_magic_parameter(Param pm)
+unset_magic_parameter(struct magic_data *data)
 {
-    struct magic_data *data = (struct magic_data *) pm->u.data;
-
     Py_DECREF(data->obj);
 
     if(data->sp_prev)
@@ -444,6 +442,7 @@ unset_magic_parameter(Param pm)
     if(!data->sp->next)
         last_assigned_param = data->sp_prev;
     PyMem_Free(data->sp);
+    PyMem_Free(data);
 }
 
 static char *
@@ -477,7 +476,7 @@ set_magic_string(Param pm, char *str)
     PYTHON_INIT;
 
     if(!str) {
-        unset_magic_parameter(pm);
+        unset_magic_parameter((struct magic_data *) pm->u.data);
 
         PYTHON_FINISH;
         return;
@@ -549,6 +548,8 @@ ZshSetMagicString(UNUSED(PyObject *self), PyObject *args)
     else
         first_assigned_param = data->sp;
     last_assigned_param = data->sp;
+    data->sp->next = NULL;
+    data->sp->name = dupstring(name);
     data->obj = obj;
     Py_INCREF(obj);
 
@@ -608,6 +609,23 @@ int
 finish_(Module m)
 {
     if(Py_IsInitialized()) {
+        struct specialparam *cur_assigned_param = first_assigned_param;
+
+        while(cur_assigned_param) {
+            Param pm;
+            char *name = cur_assigned_param->name;
+
+            queue_signals();
+            if ((pm = (Param) (paramtab == realparamtab ?
+                            gethashnode2(paramtab, name) :
+                            paramtab->getnode(paramtab, name)))) {
+                pm->node.flags &= ~PM_READONLY;
+                unsetparam_pm(pm, 0, 1);
+            }
+            unqueue_signals();
+            unsetparam(cur_assigned_param->name);
+            cur_assigned_param = cur_assigned_param->next;
+        }
         PYTHON_RESTORE_THREAD;
         Py_Finalize();
     }
