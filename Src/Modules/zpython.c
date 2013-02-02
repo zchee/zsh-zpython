@@ -197,7 +197,7 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
     }
 
     if(!(v = getvalue(&vbuf, &name, 1))) {
-        PyErr_SetString(PyExc_KeyError, "Failed to find parameter");
+        PyErr_SetString(PyExc_IndexError, "Failed to find parameter");
         return NULL;
     }
 
@@ -542,7 +542,7 @@ unset_sh_item_value(Param pm, UNUSED(int exp))
     struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
     Py_DECREF(sh_data->obj);
     Py_DECREF(sh_data->item);
-    zfree(sh_data, sizeof(struct sh_item_data));
+    PyMem_Free(sh_data);
 }
 
 static struct gsu_scalar sh_item_gsu =
@@ -571,7 +571,7 @@ get_sh_item(HashTable ht, const char *key)
     pm->gsu.s = &sh_item_unset_gsu;
 
     Py_INCREF(obj);
-    sh_data = (struct sh_item_data *) zalloc(sizeof(struct sh_item_data));
+    sh_data = PyMem_New(struct sh_item_data, 1);
     sh_data->obj = obj;
     sh_data->item = keyobj;
 
@@ -773,6 +773,11 @@ set_special_hash(Param pm, HashTable ht)
 
     PYTHON_INIT;
 
+    if(!ht) {
+        Py_DECREF(obj);
+        return;
+    }
+
     if(!(keys = PyMapping_Keys(obj))) {
         ZFAIL(("Failed to get object keys"), );
     }
@@ -829,6 +834,12 @@ unsetfn(Param pm, int exp)
 {
     unset_special_parameter((struct special_data *) pm->u.data);
     stdunsetfn(pm, exp);
+}
+
+static void
+free_sh_node(HashNode nodeptr)
+{
+    PyMem_Free(nodeptr);
 }
 
 static const struct gsu_scalar special_string_gsu =
@@ -953,14 +964,15 @@ set_special_parameter(PyObject *args, int type)
             {
                 struct obj_hash_node *ohn;
                 HashTable ht = pm->u.hash;
-                ohn = (struct obj_hash_node *) hcalloc(sizeof(struct obj_hash_node));
+                ohn = PyMem_New(struct obj_hash_node, 1);
                 ohn->nam = dupstring("obj");
                 ohn->obj = obj;
-                zfree(ht->nodes, ht->hsize * sizeof(HashNode));
-                ht->nodes = zshcalloc(1 * sizeof(HashNode));
+                zfree(ht->nodes, ht->hsize * sizeof(HashNode *));
+                ht->nodes = zshcalloc(1 * sizeof(HashNode *));
                 ht->hsize = 1;
                 *ht->nodes = (struct hashnode *) ohn;
                 pm->gsu.h = &special_hash_gsu;
+                ht->freenode = free_sh_node;
                 break;
             }
     }
@@ -988,9 +1000,24 @@ static struct PyMethodDef ZshMethods[] = {
     {"columns", ZshColumns, 0, "Get number of columns. Returns an int"},
     {"lines", ZshLines, 0, "Get number of lines. Returns an int"},
     {"subshell", ZshSubshell, 0, "Get subshell recursion depth. Returns an int"},
-    {"getvalue", ZshGetValue, 1, "Get parameter value. Returns an int"},
+    {"getvalue", ZshGetValue, 1,
+        "Get parameter value. Return types:\n"
+        "  str              for scalars\n"
+        "  long             for integer numbers\n"
+        "  float            for floating-point numbers\n"
+        "  list [str]       for array parameters\n"
+        "  dict {str : str} for associative arrays\n"
+        "Throws KeyError   if identifier is invalid,\n"
+        "       IndexError if parameter was not found\n"
+    },
     {"setvalue", ZshSetValue, 2,
-        "Set parameter value. Use None to unset.\n"
+        "Set parameter value. Use None to unset. Supported objects and corresponding\n"
+        "zsh parameter types:\n"
+        "  str               sets string scalars\n"
+        "  long or int       sets integer numbers\n"
+        "  sequence of str   sets array parameters (sequence = anything implementing\n"
+        "                    sequence protocol)\n"
+        "  dict {str : str}  sets hashes\n"
         "Throws KeyError     if identifier is invalid,\n"
         "       RuntimeError if zsh set?param/unsetparam function failed,\n"
         "       ValueError   if sequence item or dictionary key or value are not str\n"
