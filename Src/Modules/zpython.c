@@ -508,8 +508,8 @@ check_magic_name(char *name)
                 && (name[2] == 'y' || name[2] == 'Y')
                 && (name[3] == 't' || name[3] == 'T')
                 && (name[4] == 'h' || name[4] == 'H')
-                && (name[5] == 'o' || name[4] == 'O')
-                && (name[6] == 'n' || name[4] == 'N')
+                && (name[5] == 'o' || name[5] == 'O')
+                && (name[6] == 'n' || name[6] == 'N')
        ) || !isident(name))
     {
         PyErr_SetString(PyExc_KeyError, "Invalid magic identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
