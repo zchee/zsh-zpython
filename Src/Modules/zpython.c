@@ -66,40 +66,6 @@ do_zpython(char *nam, char **args, Options ops, int func)
     return exit_code;
 }
 
-static struct builtin bintab[] = {
-    BUILTIN("zpython", 0, do_zpython,  1, 1, 0, NULL, NULL),
-};
-
-static struct features module_features = {
-    bintab, sizeof(bintab)/sizeof(*bintab),
-    NULL,   0,
-    NULL,   0,
-    NULL,   0,
-    0
-};
-
-/**/
-int
-setup_(UNUSED(Module m))
-{
-    return 0;
-}
-
-/**/
-int
-features_(Module m, char ***features)
-{
-    *features = featuresarray(m, &module_features);
-    return 0;
-}
-
-/**/
-int
-enables_(Module m, int **enables)
-{
-    return handlefeatures(m, &module_features, enables);
-}
-
 static PyObject *
 ZshEval(UNUSED(PyObject *self), PyObject *args)
 {
@@ -584,9 +550,43 @@ static struct PyMethodDef ZshMethods[] = {
     {NULL, NULL, 0, NULL},
 };
 
+static struct builtin bintab[] = {
+    BUILTIN("zpython", 0, do_zpython,  1, 1, 0, NULL, NULL),
+};
+
+static struct features module_features = {
+    bintab, sizeof(bintab)/sizeof(*bintab),
+    NULL,   0,
+    NULL,   0,
+    NULL,   0,
+    0
+};
+
 /**/
 int
-boot_(Module m)
+setup_(UNUSED(Module m))
+{
+    return 0;
+}
+
+/**/
+int
+features_(Module m, char ***features)
+{
+    *features = featuresarray(m, &module_features);
+    return 0;
+}
+
+/**/
+int
+enables_(Module m, int **enables)
+{
+    return handlefeatures(m, &module_features, enables);
+}
+
+/**/
+int
+boot_(UNUSED(Module m))
 {
     zpython_subshell = zsh_subshell;
     Py_Initialize();
@@ -600,13 +600,6 @@ boot_(Module m)
 /**/
 int
 cleanup_(Module m)
-{
-    return setfeatureenables(m, &module_features, NULL);
-}
-
-/**/
-int
-finish_(Module m)
 {
     if(Py_IsInitialized()) {
         struct specialparam *cur_assigned_param = first_assigned_param;
@@ -629,5 +622,12 @@ finish_(Module m)
         PYTHON_RESTORE_THREAD;
         Py_Finalize();
     }
+    return setfeatureenables(m, &module_features, NULL);
+}
+
+/**/
+int
+finish_(UNUSED(Module m))
+{
     return 0;
 }
