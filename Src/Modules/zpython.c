@@ -80,7 +80,7 @@ ZshEval(UNUSED(PyObject *self), PyObject *args)
 }
 
 static PyObject *
-get_string(char *s)
+get_string(const char *s)
 {
     char *buf, *bufstart;
     PyObject *r;
@@ -431,9 +431,9 @@ unset_special_parameter(struct special_data *data)
 }
 
 
-#define ZFAIL(message, failval) \
+#define ZFAIL(errargs, failval) \
     PyErr_PrintEx(0); \
-    zerr(message, pm->node.nam); \
+    zerr errargs; \
     PYTHON_FINISH; \
     return failval
 
@@ -447,12 +447,12 @@ get_special_string(Param pm)
 
     robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
-        ZFAIL("Failed to get value for parameter %s", NULL);
+        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), NULL);
     }
 
     r = get_chars(robj);
     if(!r) {
-        ZFAIL("Failed to transform value for parameter %s", NULL);
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), NULL);
     }
 
     Py_DECREF(robj);
@@ -472,7 +472,7 @@ get_special_integer(Param pm)
 
     robj = PyNumber_Long(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
-        ZFAIL("Failed to get value for parameter %s", 0);
+        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
     }
 
     r = PyLong_AsLong(robj);
@@ -494,7 +494,7 @@ get_special_float(Param pm)
 
     robj = PyNumber_Float(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
-        ZFAIL("Failed to get value for parameter %s", 0);
+        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
     }
 
     r = PyFloat_AsDouble(robj);
@@ -518,19 +518,12 @@ get_special_array(Param pm)
 
     r = get_chars_array(robj);
     if(!r) {
-        ZFAIL("Failed to transform value for parameter %s", NULL);
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), hcalloc(sizeof(char **)));
     }
 
     PYTHON_FINISH;
 
     return r;
-}
-
-static void
-unsetfn(Param pm, int exp)
-{
-    unset_special_parameter((struct special_data *) pm->u.data);
-    stdunsetfn(pm, exp);
 }
 
 #define DEFINE_SETTER_FUNC(name, stype, stransargs, unsetcond) \
@@ -566,6 +559,13 @@ DEFINE_SETTER_FUNC(integer, zlong, ("(L)", (long long) val), 0)
 DEFINE_SETTER_FUNC(float, double, ("(d)", val), 0)
 DEFINE_SETTER_FUNC(array, char **, ("(O&)", get_array, val), !val)
 
+static void
+unsetfn(Param pm, int exp)
+{
+    unset_special_parameter((struct special_data *) pm->u.data);
+    stdunsetfn(pm, exp);
+}
+
 static const struct gsu_scalar special_string_gsu =
 {get_special_string, set_special_string, stdunsetfn};
 static const struct gsu_integer special_integer_gsu =
@@ -574,6 +574,127 @@ static const struct gsu_float special_float_gsu =
 {get_special_float, set_special_float, unsetfn};
 static const struct gsu_array special_array_gsu =
 {get_special_array, set_special_array, stdunsetfn};
+
+struct obj_hash_node {
+    HashNode next;
+    char *nam;
+    int flags;
+    PyObject *obj;
+};
+
+static HashNode
+get_special_hash_item(HashTable ht, const char *key)
+{
+    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
+    PyObject *keyobj, *item, *string;
+    char *str;
+    Param pm;
+
+    PYTHON_INIT;
+
+    if(!(keyobj = get_string(key))) {
+        ZFAIL(("Failed to create key %s", key), NULL);
+    }
+
+    if(!(item = PyObject_GetItem(obj, keyobj))) {
+        Py_DECREF(keyobj);
+        ZFAIL(("Failed to get item for key %s", key), NULL);
+    }
+    Py_DECREF(keyobj);
+
+    if(!(string = PyObject_Str(item))) {
+        Py_DECREF(item);
+        ZFAIL(("Failed to convert value of key %s to string", key), NULL);
+    }
+    Py_DECREF(item);
+
+    if(!(str = get_chars(string))) {
+        Py_DECREF(string);
+        ZFAIL(("Failed to get string from string object"), NULL);
+    }
+    Py_DECREF(string);
+    PYTHON_FINISH;
+
+    pm = (Param) hcalloc(sizeof(struct param));
+    pm->node.nam = dupstring(key);
+    pm->node.flags = PM_SCALAR | PM_READONLY;
+    pm->gsu.s = &nullsetscalar_gsu;
+    pm->u.str = str;
+    return &pm->node;
+}
+
+static void
+scan_special_hash(HashTable ht, ScanFunc func, int flags)
+{
+    PyObject *obj = ((struct obj_hash_node *)(ht->nodes))->obj;
+    PyObject *iter, *item;
+    HashNode hn;
+    struct param pm;
+
+    PYTHON_INIT;
+
+    memset((void *)&pm, 0, sizeof(struct param));
+    pm.node.flags = PM_SCALAR | PM_READONLY;
+    pm.gsu.s = &nullsetscalar_gsu;
+
+    if(!(iter = PyObject_GetIter(obj))) {
+        ZFAIL(("Failed to get iterator"), );
+    }
+
+    while((item = PyIter_Next(iter))) {
+        PyObject *string;
+        char *str;
+
+        if(!(string = PyObject_Str(item))) {
+            Py_DECREF(iter);
+            Py_DECREF(item);
+            ZFAIL(("Failed to convert key to string object"), );
+        }
+
+        if(!(str = get_chars(string))) {
+            Py_DECREF(string);
+            Py_DECREF(iter);
+            Py_DECREF(item);
+            ZFAIL(("Failed to get string from key string object"), );
+        }
+        Py_DECREF(string);
+        pm.node.nam = str;
+
+        if (func != scancountparams &&
+            ((flags & (SCANPM_WANTVALS|SCANPM_MATCHVAL)) ||
+             !(flags & SCANPM_WANTKEYS)))
+        {
+            PyObject *itemval;
+
+            if(!(itemval = PyObject_GetItem(obj, item))) {
+                Py_DECREF(iter);
+                Py_DECREF(item);
+                ZFAIL(("Failed to convert value to string object"), );
+            }
+            if(!(string = PyObject_Str(itemval))) {
+                Py_DECREF(iter);
+                Py_DECREF(item);
+                Py_DECREF(itemval);
+                ZFAIL(("Failed to get value string object"), );
+            }
+
+            if(!(pm.u.str = get_chars(string))) {
+                Py_DECREF(iter);
+                Py_DECREF(item);
+                Py_DECREF(itemval);
+                Py_DECREF(string);
+                ZFAIL(("Failed to get string from value string object"), );
+            }
+            Py_DECREF(string);
+            Py_DECREF(itemval);
+        }
+        Py_DECREF(item);
+        func(&pm.node, flags);
+    }
+    Py_DECREF(iter);
+
+    PYTHON_FINISH;
+}
 
 static int
 check_special_name(char *name)
@@ -612,9 +733,18 @@ set_special_parameter(PyObject *args, int type)
     if(check_special_name(name))
         return NULL;
 
-    if(!(pm = createparam(name, flags))) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to get parameter");
-        return NULL;
+    if(type == PM_HASHED) {
+        if(!(pm = createspecialhash(name, get_special_hash_item,
+                                    scan_special_hash, flags))) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create parameter");
+            return NULL;
+        }
+    }
+    else {
+        if(!(pm = createparam(name, flags))) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create parameter");
+            return NULL;
+        }
     }
 
     data = PyMem_New(struct special_data, 1);
@@ -631,7 +761,8 @@ set_special_parameter(PyObject *args, int type)
     Py_INCREF(obj);
 
     pm->level = 0;
-    pm->u.data = data;
+    if(type != PM_HASHED)
+        pm->u.data = data;
 
     switch(type) {
         case PM_SCALAR:
@@ -647,6 +778,19 @@ set_special_parameter(PyObject *args, int type)
         case PM_ARRAY:
             pm->gsu.a = &special_array_gsu;
             break;
+        case PM_HASHED:
+            {
+                struct obj_hash_node *ohn;
+                HashTable ht = pm->u.hash;
+                ohn = (struct obj_hash_node *) hcalloc(sizeof(struct obj_hash_node));
+                ohn->nam = dupstring("obj");
+                ohn->obj = obj;
+                zfree(ht->nodes, ht->hsize * sizeof(HashNode));
+                ht->nodes = zshcalloc(1 * sizeof(HashNode));
+                ht->hsize = 1;
+                *ht->nodes = (struct hashnode *) ohn;
+                break;
+            }
     }
 
     Py_RETURN_NONE;
@@ -659,10 +803,11 @@ ZshSetMagic##name(UNUSED(PyObject *self), PyObject *args) \
     return set_special_parameter(args, type); \
 }
 
-DEFINE_SPECIAL_SETTER_FUNC(String, PM_SCALAR)
+DEFINE_SPECIAL_SETTER_FUNC(String,  PM_SCALAR)
 DEFINE_SPECIAL_SETTER_FUNC(Integer, PM_INTEGER)
-DEFINE_SPECIAL_SETTER_FUNC(Float, PM_EFLOAT)
-DEFINE_SPECIAL_SETTER_FUNC(Array, PM_ARRAY)
+DEFINE_SPECIAL_SETTER_FUNC(Float,   PM_EFLOAT)
+DEFINE_SPECIAL_SETTER_FUNC(Array,   PM_ARRAY)
+DEFINE_SPECIAL_SETTER_FUNC(Hash,    PM_HASHED)
 
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
@@ -707,6 +852,13 @@ static struct PyMethodDef ZshMethods[] = {
         "  each item in sequence must have str type, __call__ method will be used\n"
         "  to set value. If object is not callable then parameter will be\n"
         "  considered readonly"},
+    {"set_special_hash", ZshSetMagicHash, 2,
+        "Define hash parameter.\n"
+        "First argument is parameter name, it must start with zpython (case is ignored).\n"
+        "  Parameter with given name must not exist.\n"
+        "Second argument is value object. It must implement __getitem__ and iterator protocol,\n"
+        "  iterator must return keys, __getitem__ must be able to work with string objects,\n"
+        "  each item must have str type"},
     {NULL, NULL, 0, NULL},
 };
 
