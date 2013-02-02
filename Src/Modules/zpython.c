@@ -11,7 +11,7 @@ struct specialparam {
     struct specialparam *next;
 };
 
-struct magic_data {
+struct special_data {
     struct specialparam *sp;
     struct specialparam *sp_prev;
     PyObject *obj;
@@ -416,7 +416,7 @@ ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
 }
 
 static void
-unset_magic_parameter(struct magic_data *data)
+unset_special_parameter(struct special_data *data)
 {
     Py_DECREF(data->obj);
 
@@ -438,14 +438,14 @@ unset_magic_parameter(struct magic_data *data)
     return failval
 
 static char *
-get_magic_string(Param pm)
+get_special_string(Param pm)
 {
     PyObject *robj;
     char *r;
 
     PYTHON_INIT;
 
-    robj = PyObject_Str(((struct magic_data *)pm->u.data)->obj);
+    robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
         ZFAIL("Failed to get value for parameter %s", NULL);
     }
@@ -463,14 +463,14 @@ get_magic_string(Param pm)
 }
 
 static zlong
-get_magic_integer(Param pm)
+get_special_integer(Param pm)
 {
     PyObject *robj;
     zlong r;
 
     PYTHON_INIT;
 
-    robj = PyNumber_Long(((struct magic_data *)pm->u.data)->obj);
+    robj = PyNumber_Long(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
         ZFAIL("Failed to get value for parameter %s", 0);
     }
@@ -485,14 +485,14 @@ get_magic_integer(Param pm)
 }
 
 static double
-get_magic_float(Param pm)
+get_special_float(Param pm)
 {
     PyObject *robj;
     float r;
 
     PYTHON_INIT;
 
-    robj = PyNumber_Float(((struct magic_data *)pm->u.data)->obj);
+    robj = PyNumber_Float(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
         ZFAIL("Failed to get value for parameter %s", 0);
     }
@@ -507,14 +507,14 @@ get_magic_float(Param pm)
 }
 
 static char **
-get_magic_array(Param pm)
+get_special_array(Param pm)
 {
     PyObject *robj;
     char **r;
 
     PYTHON_INIT;
 
-    robj = ((struct magic_data *)pm->u.data)->obj;
+    robj = ((struct special_data *)pm->u.data)->obj;
 
     r = get_chars_array(robj);
     if(!r) {
@@ -526,23 +526,30 @@ get_magic_array(Param pm)
     return r;
 }
 
+static void
+unsetfn(Param pm, int exp)
+{
+    unset_special_parameter((struct special_data *) pm->u.data);
+    stdunsetfn(pm, exp);
+}
+
 #define DEFINE_SETTER_FUNC(name, stype, stransargs, unsetcond) \
 static void \
-set_magic_##name(Param pm, stype val) \
+set_special_##name(Param pm, stype val) \
 { \
     PyObject *r, *args; \
  \
     PYTHON_INIT; \
  \
     if(unsetcond) { \
-        unset_magic_parameter((struct magic_data *) pm->u.data); \
+        unset_special_parameter((struct special_data *) pm->u.data); \
  \
         PYTHON_FINISH; \
         return; \
     } \
  \
     args = Py_BuildValue stransargs; \
-    r = PyObject_CallObject(((struct magic_data *) pm->u.data)->obj, args); \
+    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args); \
     if(!r) { \
         PyErr_PrintEx(0); \
         zerr("Failed to assign value for parameter %s", pm->node.nam); \
@@ -559,18 +566,17 @@ DEFINE_SETTER_FUNC(integer, zlong, ("(L)", (long long) val), 0)
 DEFINE_SETTER_FUNC(float, double, ("(d)", val), 0)
 DEFINE_SETTER_FUNC(array, char **, ("(O&)", get_array, val), !val)
 
-static const struct gsu_scalar magic_string_gsu =
-{get_magic_string, set_magic_string, stdunsetfn};
-/* FIXME no stdunsetfn for integer and float values */
-static const struct gsu_integer magic_integer_gsu =
-{get_magic_integer, set_magic_integer, stdunsetfn};
-static const struct gsu_float magic_float_gsu =
-{get_magic_float, set_magic_float, stdunsetfn};
-static const struct gsu_array magic_array_gsu =
-{get_magic_array, set_magic_array, stdunsetfn};
+static const struct gsu_scalar special_string_gsu =
+{get_special_string, set_special_string, stdunsetfn};
+static const struct gsu_integer special_integer_gsu =
+{get_special_integer, set_special_integer, unsetfn};
+static const struct gsu_float special_float_gsu =
+{get_special_float, set_special_float, unsetfn};
+static const struct gsu_array special_array_gsu =
+{get_special_array, set_special_array, stdunsetfn};
 
 static int
-check_magic_name(char *name)
+check_special_name(char *name)
 {
     /* Needing strncasecmp, but the one that ignores locale */
     if(!(          (name[0] == 'z' || name[0] == 'Z')
@@ -582,20 +588,20 @@ check_magic_name(char *name)
                 && (name[6] == 'n' || name[6] == 'N')
        ) || !isident(name))
     {
-        PyErr_SetString(PyExc_KeyError, "Invalid magic identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
+        PyErr_SetString(PyExc_KeyError, "Invalid special identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
         return 1;
     }
     return 0;
 }
 
 static PyObject *
-set_magic_parameter(PyObject *args, int type)
+set_special_parameter(PyObject *args, int type)
 {
     char *name;
     PyObject *obj;
     Param pm;
     int flags = type;
-    struct magic_data *data;
+    struct special_data *data;
 
     if(!PyArg_ParseTuple(args, "sO", &name, &obj))
         return NULL;
@@ -603,7 +609,7 @@ set_magic_parameter(PyObject *args, int type)
     if(!PyCallable_Check(obj))
         flags |= PM_READONLY;
 
-    if(check_magic_name(name))
+    if(check_special_name(name))
         return NULL;
 
     if(!(pm = createparam(name, flags))) {
@@ -611,7 +617,7 @@ set_magic_parameter(PyObject *args, int type)
         return NULL;
     }
 
-    data = PyMem_New(struct magic_data, 1);
+    data = PyMem_New(struct special_data, 1);
     data->sp_prev = last_assigned_param;
     data->sp = PyMem_New(struct specialparam, 1);
     if(last_assigned_param)
@@ -629,34 +635,34 @@ set_magic_parameter(PyObject *args, int type)
 
     switch(type) {
         case PM_SCALAR:
-            pm->gsu.s = &magic_string_gsu;
+            pm->gsu.s = &special_string_gsu;
             break;
         case PM_INTEGER:
-            pm->gsu.i = &magic_integer_gsu;
+            pm->gsu.i = &special_integer_gsu;
             break;
         case PM_EFLOAT:
         case PM_FFLOAT:
-            pm->gsu.f = &magic_float_gsu;
+            pm->gsu.f = &special_float_gsu;
             break;
         case PM_ARRAY:
-            pm->gsu.a = &magic_array_gsu;
+            pm->gsu.a = &special_array_gsu;
             break;
     }
 
     Py_RETURN_NONE;
 }
 
-#define DEFINE_MAGIC_SETTER_FUNC(name, type) \
+#define DEFINE_SPECIAL_SETTER_FUNC(name, type) \
 static PyObject * \
 ZshSetMagic##name(UNUSED(PyObject *self), PyObject *args) \
 { \
-    return set_magic_parameter(args, type); \
+    return set_special_parameter(args, type); \
 }
 
-DEFINE_MAGIC_SETTER_FUNC(String, PM_SCALAR)
-DEFINE_MAGIC_SETTER_FUNC(Integer, PM_INTEGER)
-DEFINE_MAGIC_SETTER_FUNC(Float, PM_EFLOAT)
-DEFINE_MAGIC_SETTER_FUNC(Array, PM_ARRAY)
+DEFINE_SPECIAL_SETTER_FUNC(String, PM_SCALAR)
+DEFINE_SPECIAL_SETTER_FUNC(Integer, PM_INTEGER)
+DEFINE_SPECIAL_SETTER_FUNC(Float, PM_EFLOAT)
+DEFINE_SPECIAL_SETTER_FUNC(Array, PM_ARRAY)
 
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
@@ -672,28 +678,28 @@ static struct PyMethodDef ZshMethods[] = {
         "       RuntimeError if zsh set?param/unsetparam function failed,\n"
         "       ValueError   if sequence item or dictionary key or value are not str\n"
         "                       or sequence size is not known."},
-    {"set_magic_string", ZshSetMagicString, 2,
+    {"set_special_string", ZshSetMagicString, 2,
         "Define scalar (string) parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
         "Second argument is value object. Its __str__ method will be used to get\n"
         "  resulting string when parameter is accessed in zsh, __call__ method will be used\n"
         "  to set value. If object is not callable then parameter will be considered readonly"},
-    {"set_magic_integer", ZshSetMagicInteger, 2,
+    {"set_special_integer", ZshSetMagicInteger, 2,
         "Define integer parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
         "Second argument is value object. It will be coerced to long integer,\n"
         "  __call__ method will be used to set value. If object is not callable\n"
         "  then parameter will be considered readonly"},
-    {"set_magic_float", ZshSetMagicFloat, 2,
+    {"set_special_float", ZshSetMagicFloat, 2,
         "Define floating point parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
         "Second argument is value object. It will be coerced to float,\n"
         "  __call__ method will be used to set value. If object is not callable\n"
         "  then parameter will be considered readonly"},
-    {"set_magic_array", ZshSetMagicArray, 2,
+    {"set_special_array", ZshSetMagicArray, 2,
         "Define array parameter.\n"
         "First argument is parameter name, it must start with zpython (case is ignored).\n"
         "  Parameter with given name must not exist.\n"
