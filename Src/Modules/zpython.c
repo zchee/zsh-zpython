@@ -626,7 +626,7 @@ get_special_hash_item(HashTable ht, const char *key)
 static void
 scan_special_hash(HashTable ht, ScanFunc func, int flags)
 {
-    PyObject *obj = ((struct obj_hash_node *)(ht->nodes))->obj;
+    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
     PyObject *iter, *item;
     HashNode hn;
     struct param pm;
