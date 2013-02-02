@@ -616,7 +616,6 @@ cleanup_(Module m)
                 unsetparam_pm(pm, 0, 1);
             }
             unqueue_signals();
-            unsetparam(cur_assigned_param->name);
             cur_assigned_param = cur_assigned_param->next;
         }
         PYTHON_RESTORE_THREAD;
