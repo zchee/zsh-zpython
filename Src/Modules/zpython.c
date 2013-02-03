@@ -796,9 +796,12 @@ set_special_hash(Param pm, HashTable ht)
 
     if(!ht) {
         Py_DECREF(obj);
+        PYTHON_FINISH;
         return;
     }
 
+    /* Can't use PyObject_GetIter on the object itself: it fails if object is
+     * being modified */
     if(!(keys = PyMapping_Keys(obj))) {
         ZFAIL(("Failed to get object keys"), );
     }
