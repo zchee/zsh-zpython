@@ -8,12 +8,13 @@
 
 struct specialparam {
     char *name;
+    Param pm;
     struct specialparam *next;
+    struct specialparam *prev;
 };
 
 struct special_data {
     struct specialparam *sp;
-    struct specialparam *sp_prev;
     PyObject *obj;
 };
 
@@ -452,12 +453,13 @@ unset_special_parameter(struct special_data *data)
 {
     Py_DECREF(data->obj);
 
-    if(data->sp_prev)
-        data->sp_prev->next = data->sp->next;
+    if(data->sp->prev)
+        data->sp->prev->next = data->sp->next;
     else
         first_assigned_param = data->sp->next;
     if(!data->sp->next)
-        last_assigned_param = data->sp_prev;
+        last_assigned_param = data->sp->prev;
+    zsfree(data->sp->name);
     PyMem_Free(data->sp);
     PyMem_Free(data);
 }
@@ -491,32 +493,32 @@ get_sh_item_value(Param pm)
         char *str;
 
         if(!(itemval = PyObject_GetItem(obj, item))) {
-            ZFAIL_NOFINISH(("Failed to convert value to string object"), dupstring(""));
+            ZFAIL_NOFINISH(("Failed to convert value to string object"), ztrdup(""));
         }
 
         if(!(string = PyObject_Str(itemval))) {
             Py_DECREF(itemval);
-            ZFAIL_NOFINISH(("Failed to get value string object"), dupstring(""));
+            ZFAIL_NOFINISH(("Failed to get value string object"), ztrdup(""));
         }
 
         if(!(str = get_chars(string))) {
             Py_DECREF(itemval);
             Py_DECREF(string);
-            ZFAIL_NOFINISH(("Failed to get string from value string object"), dupstring(""));
+            ZFAIL_NOFINISH(("Failed to get string from value string object"), ztrdup(""));
         }
         Py_DECREF(string);
         Py_DECREF(itemval);
         return str;
     }
     else
-        return dupstring("");
+        return ztrdup("");
 }
 
 static char *
 get_sh_item_value_th(Param pm)
 {
     char *r;
-    PYTHON_INIT(dupstring(""));
+    PYTHON_INIT(ztrdup(""));
     r = get_sh_item_value(pm);
     PYTHON_FINISH;
     return r;
@@ -579,7 +581,7 @@ get_sh_item(HashTable ht, const char *key)
     }
 
     pm = (Param) zshcalloc(sizeof(struct param));
-    pm->node.nam = dupstring(key);
+    pm->node.nam = ztrdup(key);
     pm->node.flags = PM_SCALAR;
     pm->gsu.s = &sh_item_unset_gsu;
 
@@ -650,16 +652,16 @@ get_special_string(Param pm)
     PyObject *robj;
     char *r;
 
-    PYTHON_INIT(dupstring(""));
+    PYTHON_INIT(ztrdup(""));
 
     robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
-        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), dupstring(""));
+        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), ztrdup(""));
     }
 
     r = get_chars(robj);
     if(!r) {
-        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), dupstring(""));
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), ztrdup(""));
     }
 
     Py_DECREF(robj);
@@ -852,6 +854,7 @@ unsetfn(Param pm, int exp)
 static void
 free_sh_node(HashNode nodeptr)
 {
+    zsfree(nodeptr->nam);
     PyMem_Free(nodeptr);
 }
 
@@ -944,15 +947,16 @@ set_special_parameter(PyObject *args, int type)
     }
 
     data = PyMem_New(struct special_data, 1);
-    data->sp_prev = last_assigned_param;
     data->sp = PyMem_New(struct specialparam, 1);
+    data->sp->prev = last_assigned_param;
     if(last_assigned_param)
         last_assigned_param->next = data->sp;
     else
         first_assigned_param = data->sp;
     last_assigned_param = data->sp;
     data->sp->next = NULL;
-    data->sp->name = dupstring(name);
+    data->sp->name = ztrdup(name);
+    data->sp->pm = pm;
     data->obj = obj;
     Py_INCREF(obj);
 
@@ -979,7 +983,7 @@ set_special_parameter(PyObject *args, int type)
                 struct obj_hash_node *ohn;
                 HashTable ht = pm->u.hash;
                 ohn = PyMem_New(struct obj_hash_node, 1);
-                ohn->nam = dupstring("obj");
+                ohn->nam = ztrdup("obj");
                 ohn->obj = obj;
                 zfree(ht->nodes, ht->hsize * sizeof(HashNode *));
                 ht->nodes = zshcalloc(1 * sizeof(HashNode *));
@@ -1130,21 +1134,40 @@ int
 cleanup_(Module m)
 {
     if(Py_IsInitialized()) {
-        struct specialparam *cur_assigned_param = first_assigned_param;
+        struct specialparam *cur_sp = first_assigned_param;
 
-        while(cur_assigned_param) {
-            Param pm;
-            char *name = cur_assigned_param->name;
+        while(cur_sp) {
+            char *name = cur_sp->name;
+            Param pm = (Param) paramtab->getnode(paramtab, name);
+            struct specialparam *next_sp = cur_sp->next;
 
-            queue_signals();
-            if ((pm = (Param) (paramtab == realparamtab ?
-                            gethashnode2(paramtab, name) :
-                            paramtab->getnode(paramtab, name)))) {
-                pm->node.flags &= ~PM_READONLY;
+            if (pm && pm != cur_sp->pm) {
+                Param prevpm, searchpm;
+                prevpm = pm;
+                searchpm = pm->old;
+                while (searchpm && searchpm != cur_sp->pm) {
+                    prevpm = searchpm;
+                    searchpm = searchpm->old;
+                }
+                if (searchpm) {
+                    paramtab->removenode(paramtab, pm->node.nam);
+                    prevpm->old = searchpm->old;
+                    searchpm->old = pm;
+                    paramtab->addnode(paramtab, searchpm->node.nam, searchpm);
+
+                    pm = searchpm;
+                }
+                else {
+                    pm = NULL;
+                }
+            }
+            if (pm) {
+                pm->node.flags = (pm->node.flags & ~PM_READONLY) | PM_REMOVABLE;
                 unsetparam_pm(pm, 0, 1);
             }
-            unqueue_signals();
-            cur_assigned_param = cur_assigned_param->next;
+            /* Memory was freed while unsetting parameter, thus need to save
+             * sp->next */
+            cur_sp = next_sp;
         }
         PYTHON_RESTORE_THREAD;
         Py_Finalize();
