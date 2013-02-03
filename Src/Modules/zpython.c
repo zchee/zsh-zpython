@@ -349,6 +349,15 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
             return NULL;
         }
     }
+    else if (PyFloat_Check(value)) {
+        mnumber mnval;
+        mnval.type = MN_FLOAT;
+        mnval.u.d = PyFloat_AsDouble(value);
+        if (!setnparam(name, mnval)) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to assign float parameter");
+            return NULL;
+        }
+    }
     else if (PyDict_Check(value)) {
         char **val, **valstart;
         PyObject *pkey, *pval;
@@ -668,12 +677,12 @@ get_special_integer(Param pm)
 
     PYTHON_INIT(0);
 
-    robj = PyNumber_Long(((struct special_data *)pm->u.data)->obj);
+    robj = PyNumber_Int(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
         ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
     }
 
-    r = PyLong_AsLong(robj);
+    r = PyInt_AsLong(robj);
 
     Py_DECREF(robj);
 
@@ -868,6 +877,7 @@ check_special_name(char *name)
                 && (name[4] == 'h' || name[4] == 'H')
                 && (name[5] == 'o' || name[5] == 'O')
                 && (name[6] == 'n' || name[6] == 'N')
+                && (name[7] != '\0')
        ) || !isident(name))
     {
         PyErr_SetString(PyExc_KeyError, "Invalid special identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
@@ -1019,6 +1029,7 @@ static struct PyMethodDef ZshMethods[] = {
         "zsh parameter types:\n"
         "  str               sets string scalars\n"
         "  long or int       sets integer numbers\n"
+        "  float             sets floating-point numbers. Output is in scientific notation\n"
         "  sequence of str   sets array parameters (sequence = anything implementing\n"
         "                    sequence protocol)\n"
         "  dict {str : str}  sets hashes\n"
