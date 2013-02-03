@@ -4,6 +4,7 @@
     zpython 'import zsh, sys, os'
     zpython 'sys.path.append(os.getcwd())'
     zpython 'from ztstutil import *'
+    functio exe() { { eval "$@" } always { TRY_BLOCK_ERROR=0 } }
   else
     ZTST_unimplemented="The module zsh/zpython is not available"
   fi
@@ -203,33 +204,48 @@
 >ZPYTHON_ARRAY3:
 
   zmodload -i zsh/zpython
-  zpython 'import zsh'
+  zpython 'import zsh, sys, os'
+  zpython 'sys.path.append(os.getcwd())'
+  zpython 'from ztstutil import *'
+  zpython 'zsh.set_special_hash("zpython_hsh", EHash())'
   zpython 'zsh.getvalue("NOT AN IDENTIFIER")'
   zpython 'zsh.getvalue("XXX_UNKNOWN_PARAMETER")'
   zpython 'zsh.setvalue("NOT AN IDENTIFIER", "")'
   zpython 'zsh.setvalue("NOT_A_STRING_ITEM", [1])'
+  zpython 'zsh.setvalue("UNKNOWN_SIZE", EArray())'
   zpython 'zsh.setvalue("NOT_A_STRING_KEY", {1 : "abc"})'
   zpython 'zsh.setvalue("NOT_A_STRING_VALUE", {"abc" : 1})'
   zpython 'zsh.setvalue("UNKNOWN_TYPE", str)'
 1:Various errors: getvalue and setvalue
+# NOT AN IDENTIFIER
 *?Traceback*
 ?*
 ?KeyError:*
+# XXX_UNKNOWN_PARAMETER
 ?Traceback*
 ?*
 ?IndexError:*
+# NOT AN IDENTIFIER
 ?Traceback*
 ?*
 ?KeyError:*
+# NOT_A_STRING_ITEM
 ?Traceback*
 ?*
 ?TypeError:*
+# UNKNOWN_SIZE
+?Traceback*
+?*
+?ValueError:*
+# NOT_A_STRING_KEY
 ?Traceback*
 ?*
 ?TypeError:*
+# NOT_A_STRING_VALUE
 ?Traceback*
 ?*
 ?TypeError:*
+# UNKNOWN_TYPE
 ?Traceback*
 ?*
 ?TypeError:*
@@ -241,21 +257,27 @@
   zpython 'zsh.set_special_hash("NO_ZPYTHON_HASH", {})'
   zpython 'zsh.set_special_string("ZPYTHON", "")'
 1:Key errors: set_special_*
+# NO_ZPYTHON_STRING
 *?Traceback*
 ?*
 ?KeyError:*
+# NO_ZPYTHON_INT
 ?Traceback*
 ?*
 ?KeyError:*
+# NO_ZPYTHON_FLOAT
 ?Traceback*
 ?*
 ?KeyError:*
+# NO_ZPYTHON_ARRAY
 ?Traceback*
 ?*
 ?KeyError:*
+# NO_ZPYTHON_HASH
 ?Traceback*
 ?*
 ?KeyError:*
+# ZPYTHON
 ?Traceback*
 ?*
 ?KeyError:*
@@ -267,18 +289,23 @@
   zpython 'zsh.set_special_array("zpython_v", [])'
   zpython 'zsh.set_special_hash("zpython_v", {})'
 1:Runtime errors (occupied variable name): set_special_*
+# string
 *?Traceback*
 ?*
 ?RuntimeError:*
+# integer
 ?Traceback*
 ?*
 ?RuntimeError:*
+# float
 ?Traceback*
 ?*
 ?RuntimeError:*
+# array
 ?Traceback*
 ?*
 ?RuntimeError:*
+# hash
 ?Traceback*
 ?*
 ?RuntimeError:*
@@ -288,17 +315,145 @@
   zpython 'zsh.set_special_array("zpython_arr", 0)'
   zpython 'zsh.set_special_hash("zpython_hsh", 0)'
 1:Type errors (unimplemented protocols): set_special_*
+# integer
 *?Traceback*
 ?*
 ?TypeError:*
+# float
 ?Traceback*
 ?*
 ?TypeError:*
+# array
 ?Traceback*
 ?*
 ?TypeError:*
+# hash
 ?Traceback*
 ?*
 ?TypeError:*
+
+  exe 'echo $zpython_hsh'
+  exe 'echo $zpython_hsh[2]'
+  exe 'zpython_hsh=(a b)'
+  exe 'zpython_hsh+=(a b)'
+  exe 'zpython_hsh[1]=""'
+1:
+# echo $zpython_hsh
+*?Traceback*
+?*
+?*
+?NotImplementedError
+?*:1:*iterator*
+?Traceback*
+?*
+?*
+?NotImplementedError
+# echo $zpython_hsh[2]
+?Traceback*
+?*
+?*
+?SystemError
+?*:1:*value object*
+?Traceback*
+?*
+?*
+?SystemError
+# zpython_hsh=(a b)
+?Traceback*
+?*
+?*
+?ValueError
+?*:1:*object keys*
+# zpython_hsh+=(a b)
+?TypeError:*
+?*:1:*set object*
+# zpython_hsh[1]=""
+?Traceback*
+?*
+?*
+?SystemError
+?*:1:*value object*
+?TypeError:*
+
+  zpython 'zsh.set_special_hash("zpython_hsh2", EHash2())'
+  zpython 'zsh.set_special_hash("zpython_hsh3", EHash3())'
+  zpython 'zsh.set_special_string("zpython_str", EStr())'
+  zpython 'zsh.set_special_integer("zpython_int", ENum())'
+  zpython 'zsh.set_special_float("zpython_flt", ENum())'
+  exe 'echo $zpython_hsh2'
+  exe 'echo $zpython_hsh3'
+  exe 'echo $zpython_str'
+  exe 'echo $zpython_int'
+  exe 'echo $zpython_flt'
+  exe 'zpython_str=""'
+  exe 'zpython_int=2'
+  exe 'zpython_flt=2'
+1:
+# echo $zpython_hsh2
+*?Traceback*
+?*
+?*
+?NotImplementedError
+?*:1:*get value string*
+# echo $zpython_hsh3
+?Traceback*
+?*
+?*
+?NotImplementedError
+?*:1:*key to string object*
+?Traceback*
+?*
+?*
+?NotImplementedError
+# echo $zpython_str
+?Traceback*
+?*
+?*
+?NotImplementedError
+?*:1:*create string object*
+# echo $zpython_int
+?Traceback*
+?*
+?*
+?IndexError
+?*:1:*create int object*
+# echo $zpython_flt
+?Traceback*
+?*
+?*
+?KeyError
+?*:1:*create float object*
+# zpython_str=""
+?Traceback*
+?*
+?*
+?KeyError
+?*:1:*assign value for string*
+# zpython_int=2
+?Traceback*
+?*
+?*
+?ValueError
+?*:1:*assign value for integer*
+# zpython_flt=2
+?Traceback*
+?*
+?*
+?ValueError
+?*:1:*assign value for float*
+
+  zpython 'zsh.set_special_array("zpython_arr", EArray())'
+  exe 'echo $zpython_arr'
+  exe 'zpython_arr=(a b c)'
+1:
+# echo $zpython_arr
+*?ValueError:*
+?*:1:*create array*
+# zpython_arr=(a b c)
+?Traceback*
+?*
+?*
+?IndexError
+?*:1:*assign value for array*
 
 %clean

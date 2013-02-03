@@ -86,3 +86,55 @@ class Hash(object):
     def __iter__(self):
         self.accappend('i')
         return iter(['acc']+self.d.keys())
+
+class EHash(object):
+    def __getitem__(self, i):
+        raise SystemError()
+
+    # Invalid number of arguments
+    def __setitem__(self, i):
+        pass
+
+    def __iter__(self):
+        raise NotImplementedError()
+
+    def keys(self):
+        raise ValueError()
+
+class EStr(object):
+    def __str__(self):
+        raise NotImplementedError()
+
+    def __call__(self, s):
+        raise KeyError()
+
+class EHash2(object):
+    def __getitem__(self, i):
+        return EStr()
+
+    def __iter__(self):
+        return iter(range(1))
+
+class EHash3(object):
+    def __getitem__(self, i):
+        return None
+
+    def __iter__(self):
+        return iter([EStr()])
+
+class ENum(float):
+    def __int__(self):
+        raise IndexError()
+
+    def __float__(self):
+        raise KeyError()
+
+    def __call__(self, i):
+        raise ValueError()
+
+class EArray(Array):
+    def __len__(self):
+        raise NotImplementedError()
+
+    def __call__(self, a):
+        raise IndexError()
