@@ -456,4 +456,28 @@
 ?IndexError
 ?*:1:*assign value for array*
 
+  zpython 'zsh.setvalue("NULL_STRING", "\0")'
+  echo $(( #NULL_STRING ))
+  zpython 'print repr(zsh.getvalue("NULL_STRING"))'
+  zpython 'd={};zsh.set_special_hash("ZPYTHON_NHSH", d)'
+  ZPYTHON_NHSH[$NULL_STRING]=$'\0\0'
+  zpython 'print repr(d)'
+  VALUE="${ZPYTHON_NHSH[$NULL_STRING]}"
+  echo $(( #VALUE ))
+  KEYS="${(k)ZPYTHON_NHSH}"
+  echo $(( #KEYS ))
+  set -A NULLS_ARRAY $'\0' $'a\0b'
+  zpython 'print(repr(zsh.getvalue("NULLS_ARRAY")))'
+  typeset -A NULLS_HASH
+  NULLS_HASH=( $'\0a\0' $'b\0a' )
+  zpython 'print(repr(zsh.getvalue("NULLS_HASH")))'
+0:Null in various strings
+>0
+>'\x00'
+>{'\x00': '\x00\x00'}
+>0
+>0
+>['\x00', 'a\x00b']
+>{'\x00a\x00': 'b\x00a'}
+
 %clean
