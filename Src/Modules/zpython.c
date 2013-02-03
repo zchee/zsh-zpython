@@ -415,17 +415,29 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     Py_RETURN_NONE;
 }
 
-#define ZSH_GETLONG_FUNCTION(funcname, var) \
-static PyObject * \
-Zsh##funcname(UNUSED(PyObject *self), UNUSED(PyObject *args)) \
-{ \
-    return PyInt_FromLong((long) var); \
+static PyObject *
+ZshExitCode(UNUSED(PyObject *self), UNUSED(PyObject *args))
+{
+    return PyInt_FromLong((long) lastval);
 }
 
-ZSH_GETLONG_FUNCTION(ExitCode, lastval)
-ZSH_GETLONG_FUNCTION(Columns,  zterm_columns)
-ZSH_GETLONG_FUNCTION(Lines,    zterm_lines)
-ZSH_GETLONG_FUNCTION(Subshell, zsh_subshell)
+static PyObject *
+ZshColumns(UNUSED(PyObject *self), UNUSED(PyObject *args))
+{
+    return PyInt_FromLong((long) zterm_columns);
+}
+
+static PyObject *
+ZshLines(UNUSED(PyObject *self), UNUSED(PyObject *args))
+{
+    return PyInt_FromLong((long) zterm_lines);
+}
+
+static PyObject *
+ZshSubshell(UNUSED(PyObject *self), UNUSED(PyObject *args))
+{
+    return PyInt_FromLong((long) zsh_subshell);
+}
 
 static PyObject *
 ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
@@ -741,38 +753,99 @@ get_special_array(Param pm)
     return r;
 }
 
-#define DEFINE_SETTER_FUNC(name, stype, stransargs, unsetcond) \
-static void \
-set_special_##name(Param pm, stype val) \
-{ \
-    PyObject *r, *args; \
- \
-    PYTHON_INIT(); \
- \
-    if(unsetcond) { \
-        unset_special_parameter((struct special_data *) pm->u.data); \
- \
-        PYTHON_FINISH; \
-        return; \
-    } \
- \
-    args = Py_BuildValue stransargs; \
-    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args); \
-    if(!r) { \
-        PyErr_PrintEx(0); \
-        zerr("Failed to assign value for parameter %s", pm->node.nam); \
-        PYTHON_FINISH; \
-        return; \
-    } \
-    Py_DECREF(r); \
- \
-    PYTHON_FINISH; \
+static void
+set_special_string(Param pm, char *val)
+{
+    PyObject *r, *args;
+
+    PYTHON_INIT();
+
+    if(!val) {
+        unset_special_parameter((struct special_data *) pm->u.data);
+
+        PYTHON_FINISH;
+        return;
+    }
+
+    args = Py_BuildValue("(O&)", get_string, val);
+    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    if(!r) {
+        PyErr_PrintEx(0);
+        zerr("Failed to assign value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return;
+    }
+    Py_DECREF(r);
+
+    PYTHON_FINISH;
 }
 
-DEFINE_SETTER_FUNC(string, char *, ("(O&)", get_string, val), !val)
-DEFINE_SETTER_FUNC(integer, zlong, ("(L)", (long long) val), 0)
-DEFINE_SETTER_FUNC(float, double, ("(d)", val), 0)
-DEFINE_SETTER_FUNC(array, char **, ("(O&)", get_array, val), !val)
+static void
+set_special_integer(Param pm, zlong val)
+{
+    PyObject *r, *args;
+
+    PYTHON_INIT();
+
+    args = Py_BuildValue("(L)", (long long) val);
+    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    if(!r) {
+        PyErr_PrintEx(0);
+        zerr("Failed to assign value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return;
+    }
+    Py_DECREF(r);
+
+    PYTHON_FINISH;
+}
+
+static void
+set_special_float(Param pm, double val)
+{
+    PyObject *r, *args;
+
+    PYTHON_INIT();
+
+    args = Py_BuildValue("(d)", val);
+    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    if(!r) {
+        PyErr_PrintEx(0);
+        zerr("Failed to assign value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return;
+    }
+    Py_DECREF(r);
+
+    PYTHON_FINISH;
+}
+
+static void
+set_special_array(Param pm, char **val)
+{
+    PyObject *r, *args;
+
+    PYTHON_INIT();
+
+    if(!val) {
+        unset_special_parameter((struct special_data *) pm->u.data);
+
+        PYTHON_FINISH;
+        return;
+    }
+
+    args = Py_BuildValue("(O&)", get_array, val);
+    r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    if(!r) {
+        PyErr_PrintEx(0);
+        zerr("Failed to assign value for parameter %s", pm->node.nam);
+        PYTHON_FINISH;
+        return;
+    }
+    Py_DECREF(r);
+
+    PYTHON_FINISH;
+}
 
 static void
 unset_sh_item(HashNode ht, UNUSED(int flags))
@@ -1007,18 +1080,35 @@ set_special_parameter(PyObject *args, int type)
     Py_RETURN_NONE;
 }
 
-#define DEFINE_SPECIAL_SETTER_FUNC(name, type) \
-static PyObject * \
-ZshSetMagic##name(UNUSED(PyObject *self), PyObject *args) \
-{ \
-    return set_special_parameter(args, type); \
+static PyObject *
+ZshSetMagicString(UNUSED(PyObject *self), PyObject *args)
+{
+    return set_special_parameter(args, PM_SCALAR);
 }
 
-DEFINE_SPECIAL_SETTER_FUNC(String,  PM_SCALAR)
-DEFINE_SPECIAL_SETTER_FUNC(Integer, PM_INTEGER)
-DEFINE_SPECIAL_SETTER_FUNC(Float,   PM_EFLOAT)
-DEFINE_SPECIAL_SETTER_FUNC(Array,   PM_ARRAY)
-DEFINE_SPECIAL_SETTER_FUNC(Hash,    PM_HASHED)
+static PyObject *
+ZshSetMagicInteger(UNUSED(PyObject *self), PyObject *args)
+{
+    return set_special_parameter(args, PM_INTEGER);
+}
+
+static PyObject *
+ZshSetMagicFloat(UNUSED(PyObject *self), PyObject *args)
+{
+    return set_special_parameter(args, PM_EFLOAT);
+}
+
+static PyObject *
+ZshSetMagicArray(UNUSED(PyObject *self), PyObject *args)
+{
+    return set_special_parameter(args, PM_ARRAY);
+}
+
+static PyObject *
+ZshSetMagicHash(UNUSED(PyObject *self), PyObject *args)
+{
+    return set_special_parameter(args, PM_HASHED);
+}
 
 static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, 1, "Evaluate command in current shell context",},
