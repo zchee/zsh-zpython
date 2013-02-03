@@ -786,7 +786,7 @@ set_special_string(Param pm, char *val)
     Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
-	zerr("Failed to assign value for parameter %s", pm->node.nam);
+	zerr("Failed to assign value for string parameter %s", pm->node.nam);
 	PYTHON_FINISH;
 	return;
     }
@@ -807,7 +807,7 @@ set_special_integer(Param pm, zlong val)
     Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
-	zerr("Failed to assign value for parameter %s", pm->node.nam);
+	zerr("Failed to assign value for integer parameter %s", pm->node.nam);
 	PYTHON_FINISH;
 	return;
     }
@@ -828,7 +828,7 @@ set_special_float(Param pm, double val)
     Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
-	zerr("Failed to assign value for parameter %s", pm->node.nam);
+	zerr("Failed to assign value for float parameter %s", pm->node.nam);
 	PYTHON_FINISH;
 	return;
     }
@@ -856,7 +856,7 @@ set_special_array(Param pm, char **val)
     Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
-	zerr("Failed to assign value for parameter %s", pm->node.nam);
+	zerr("Failed to assign value for array parameter %s", pm->node.nam);
 	PYTHON_FINISH;
 	return;
     }
