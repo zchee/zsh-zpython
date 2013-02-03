@@ -522,7 +522,8 @@ get_sh_item_value(Param pm)
 	    }
 	    /* Unexpected result: unknown exception */
 	    else
-		ZFAIL_NOFINISH(("Failed to get value object"), ztrdup(""));
+		ZFAIL_NOFINISH(("Failed to get value object for parameter %s",
+			    pm->node.nam), ztrdup(""));
 	}
 	else
 	    return ztrdup("");
@@ -530,13 +531,15 @@ get_sh_item_value(Param pm)
 
     if (!(string = PyObject_Str(itemval))) {
 	Py_DECREF(itemval);
-	ZFAIL_NOFINISH(("Failed to get value string object"), ztrdup(""));
+	ZFAIL_NOFINISH(("Failed to get value string object for parameter %s",
+		    pm->node.nam), ztrdup(""));
     }
 
     if (!(str = get_chars(string))) {
 	Py_DECREF(itemval);
 	Py_DECREF(string);
-	ZFAIL_NOFINISH(("Failed to get string from value string object"),
+	ZFAIL_NOFINISH(("Failed to get string from value string object "
+		    "for parameter %s", pm->node.nam),
 		ztrdup(""));
     }
     Py_DECREF(string);
@@ -563,12 +566,14 @@ set_sh_item_value(Param pm, char *val)
     PyObject *valobj;
 
     if (!(valobj = get_string(val))) {
-	ZFAIL_NOFINISH(("Failed to get value string object"), );
+	ZFAIL_NOFINISH(("Failed to get value string object for parameter %s",
+		    pm->node.nam), );
     }
 
     if (PyObject_SetItem(obj, item, valobj) == -1) {
 	Py_DECREF(valobj);
-	ZFAIL_NOFINISH(("Failed to set object"), );
+	ZFAIL_NOFINISH(("Failed to set object from parameter %s to \"%s\"",
+		    pm->node.nam, val), );
     }
     Py_DECREF(valobj);
 }
@@ -598,7 +603,7 @@ static struct gsu_scalar sh_item_unset_gsu =
 static HashNode
 get_sh_item(HashTable ht, const char *key)
 {
-    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
+    PyObject *obj = ((struct obj_hash_node *) (*ht->nodes))->obj;
     PyObject *keyobj, *item, *string;
     char *str;
     Param pm;
@@ -630,7 +635,7 @@ get_sh_item(HashTable ht, const char *key)
 static void
 scan_special_hash(HashTable ht, ScanFunc func, int flags)
 {
-    PyObject *obj = ((struct obj_hash_node *)(*ht->nodes))->obj;
+    PyObject *obj = ((struct obj_hash_node *) (*ht->nodes))->obj;
     PyObject *iter, *item;
     HashNode hn;
     struct param pm;
@@ -684,14 +689,12 @@ get_special_string(Param pm)
 
     PYTHON_INIT(ztrdup(""));
 
-    robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
-    if (!robj) {
+    if (!(robj = PyObject_Str(((struct special_data *) pm->u.data)->obj))) {
 	ZFAIL(("Failed to get value for parameter %s", pm->node.nam),
 		ztrdup(""));
     }
 
-    r = get_chars(robj);
-    if (!r) {
+    if (!(r = get_chars(obj))) {
 	ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
 		ztrdup(""));
     }
@@ -711,8 +714,7 @@ get_special_integer(Param pm)
 
     PYTHON_INIT(0);
 
-    robj = PyNumber_Int(((struct special_data *)pm->u.data)->obj);
-    if (!robj) {
+    if (!(robj = PyNumber_Int(((struct special_data *) pm->u.data)->obj))) {
 	ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
     }
 
@@ -733,8 +735,7 @@ get_special_float(Param pm)
 
     PYTHON_INIT(0.0);
 
-    robj = PyNumber_Float(((struct special_data *)pm->u.data)->obj);
-    if (!robj) {
+    if (!(robj = PyNumber_Float(((struct special_data *) pm->u.data)->obj))) {
 	ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
     }
 
@@ -750,15 +751,11 @@ get_special_float(Param pm)
 static char **
 get_special_array(Param pm)
 {
-    PyObject *robj;
     char **r;
 
     PYTHON_INIT(zshcalloc(sizeof(char **)));
 
-    robj = ((struct special_data *)pm->u.data)->obj;
-
-    r = get_chars_array(robj);
-    if (!r) {
+    if (!(r = get_chars_array(((struct special_data *) pm->u.data)->obj))) {
 	ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
 		zshcalloc(sizeof(char **)));
     }
@@ -874,7 +871,7 @@ set_special_hash(Param pm, HashTable ht)
 {
     int i;
     HashNode hn;
-    PyObject *obj = ((struct obj_hash_node *)(*pm->u.hash->nodes))->obj;
+    PyObject *obj = ((struct obj_hash_node *) (*pm->u.hash->nodes))->obj;
     PyObject *keys, *iter, *item;
 
     if (pm->u.hash == ht)
