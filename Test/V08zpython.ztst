@@ -202,4 +202,103 @@
 >ZPYTHON_HASH2:
 >ZPYTHON_ARRAY3:
 
+  zmodload -i zsh/zpython
+  zpython 'import zsh'
+  zpython 'zsh.getvalue("NOT AN IDENTIFIER")'
+  zpython 'zsh.getvalue("XXX_UNKNOWN_PARAMETER")'
+  zpython 'zsh.setvalue("NOT AN IDENTIFIER", "")'
+  zpython 'zsh.setvalue("NOT_A_STRING_ITEM", [1])'
+  zpython 'zsh.setvalue("NOT_A_STRING_KEY", {1 : "abc"})'
+  zpython 'zsh.setvalue("NOT_A_STRING_VALUE", {"abc" : 1})'
+  zpython 'zsh.setvalue("UNKNOWN_TYPE", str)'
+1:Various errors: getvalue and setvalue
+*?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?IndexError:*
+?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+
+  zpython 'zsh.set_special_string("NO_ZPYTHON_STRING", "")'
+  zpython 'zsh.set_special_integer("NO_ZPYTHON_INT", 0)'
+  zpython 'zsh.set_special_float("NO_ZPYTHON_FLOAT", 0.0)'
+  zpython 'zsh.set_special_array("NO_ZPYTHON_ARRAY", [])'
+  zpython 'zsh.set_special_hash("NO_ZPYTHON_HASH", {})'
+  zpython 'zsh.set_special_string("ZPYTHON", "")'
+1:Key errors: set_special_*
+*?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?KeyError:*
+?Traceback*
+?*
+?KeyError:*
+
+  zpython 'zsh.set_special_integer("zpython_v", 0)'
+  zpython 'zsh.set_special_string("zpython_v", "")'
+  zpython 'zsh.set_special_integer("zpython_v", 0)'
+  zpython 'zsh.set_special_float("zpython_v", 0.0)'
+  zpython 'zsh.set_special_array("zpython_v", [])'
+  zpython 'zsh.set_special_hash("zpython_v", {})'
+1:Runtime errors (occupied variable name): set_special_*
+*?Traceback*
+?*
+?RuntimeError:*
+?Traceback*
+?*
+?RuntimeError:*
+?Traceback*
+?*
+?RuntimeError:*
+?Traceback*
+?*
+?RuntimeError:*
+?Traceback*
+?*
+?RuntimeError:*
+
+  zpython 'zsh.set_special_integer("zpython_int", [])'
+  zpython 'zsh.set_special_float("zpython_flt", [])'
+  zpython 'zsh.set_special_array("zpython_arr", 0)'
+  zpython 'zsh.set_special_hash("zpython_hsh", 0)'
+1:Type errors (unimplemented protocols): set_special_*
+*?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+?Traceback*
+?*
+?TypeError:*
+
 %clean
