@@ -489,8 +489,8 @@ unset_special_parameter(struct special_data *data)
 #define ZFAIL(errargs, failval) \
     PyErr_PrintEx(0); \
     PyErr_Clear(); \
-    zerr errargs; \
     PYTHON_FINISH; \
+    zerr errargs; \
     return failval
 
 #define ZFAIL_NOFINISH(errargs, failval) \
@@ -566,7 +566,7 @@ set_sh_item_value(Param pm, char *val)
     PyObject *valobj;
 
     if (!(valobj = get_string(val))) {
-	ZFAIL_NOFINISH(("Failed to get value string object for parameter %s",
+	ZFAIL_NOFINISH(("Failed to create value string object for parameter %s",
 		    pm->node.nam), );
     }
 
@@ -612,7 +612,7 @@ get_sh_item(HashTable ht, const char *key)
     PYTHON_INIT(NULL);
 
     if (!(keyobj = get_string(key))) {
-	ZFAIL(("Failed to create key %s", key), NULL);
+	ZFAIL(("Failed to create key string object for key \"%s\"", key), NULL);
     }
 
     pm = (Param) zshcalloc(sizeof(struct param));
@@ -690,8 +690,8 @@ get_special_string(Param pm)
     PYTHON_INIT(ztrdup(""));
 
     if (!(robj = PyObject_Str(((struct special_data *) pm->u.data)->obj))) {
-	ZFAIL(("Failed to get value for parameter %s", pm->node.nam),
-		ztrdup(""));
+	ZFAIL(("Failed to create string object for parameter %s",
+		    pm->node.nam), ztrdup(""));
     }
 
     if (!(r = get_chars(robj))) {
@@ -715,7 +715,8 @@ get_special_integer(Param pm)
     PYTHON_INIT(0);
 
     if (!(robj = PyNumber_Int(((struct special_data *) pm->u.data)->obj))) {
-	ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
+	ZFAIL(("Failed to create int object for parameter %s", pm->node.nam),
+		0);
     }
 
     r = PyInt_AsLong(robj);
@@ -736,7 +737,8 @@ get_special_float(Param pm)
     PYTHON_INIT(0.0);
 
     if (!(robj = PyNumber_Float(((struct special_data *) pm->u.data)->obj))) {
-	ZFAIL(("Failed to get value for parameter %s", pm->node.nam), 0);
+	ZFAIL(("Failed to create float object for parameter %s", pm->node.nam),
+		0);
     }
 
     r = PyFloat_AsDouble(robj);
@@ -756,7 +758,7 @@ get_special_array(Param pm)
     PYTHON_INIT(zshcalloc(sizeof(char **)));
 
     if (!(r = get_chars_array(((struct special_data *) pm->u.data)->obj))) {
-	ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
+	ZFAIL(("Failed to create array object for parameter %s", pm->node.nam),
 		zshcalloc(sizeof(char **)));
     }
 
