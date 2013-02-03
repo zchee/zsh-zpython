@@ -2634,10 +2634,15 @@ AC_HELP_STRING([--enable-zpython], [compile zsh/zpython module]),
 [zpython="$enableval"], [zpython=yes])
 AC_ARG_WITH(python-config-dir,
 AC_HELP_STRING([--with-python-config-dir=FILE], [Python config directory]),
-[zpython_confdir="$zpython"], [zpython_confdir=""])dnl
+[zsh_cv_path_python_conf="$withval"])dnl
+AC_ARG_WITH(python-executable,
+AC_HELP_STRING([--with-python-executable=FILE], [Path to python executable]),
+[zsh_cv_path_python="$withval"])dnl
 if test x$zpython = xyes; then
     dnl Copied from vim's src/configure.in
-    AC_PATH_PROGS(zsh_cv_path_python, python2 python)
+    if test x$zsh_cv_path_python == x; then
+        AC_PATH_PROGS(zsh_cv_path_python, python2 python)
+    fi
     AC_CACHE_CHECK(Python version, zsh_cv_python_version,
     [[zsh_cv_python_version=`${zsh_cv_path_python} -c 'import sys; print sys.version[:3]'`]])
     AC_CACHE_CHECK(Python install prefix, zsh_cv_path_python_pfx,

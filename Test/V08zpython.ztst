@@ -190,7 +190,8 @@
   for v in ZPYTHON_{{STRING,INT,FLOAT,ARRAY,HASH}{,2},ARRAY3} ; do
     echo ${v}:${(P)v}
   done
-0:Module unloading
+# Ignoring stderr is needed for python with memory debugging enabled
+0D:Module unloading
 >ZPYTHON_STRING:
 >ZPYTHON_STRING2:
 >ZPYTHON_INT:
