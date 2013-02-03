@@ -694,7 +694,7 @@ get_special_string(Param pm)
 		ztrdup(""));
     }
 
-    if (!(r = get_chars(obj))) {
+    if (!(r = get_chars(robj))) {
 	ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
 		ztrdup(""));
     }
