@@ -488,12 +488,14 @@ unset_special_parameter(struct special_data *data)
 
 #define ZFAIL(errargs, failval) \
     PyErr_PrintEx(0); \
+    PyErr_Clear(); \
     zerr errargs; \
     PYTHON_FINISH; \
     return failval
 
 #define ZFAIL_NOFINISH(errargs, failval) \
     PyErr_PrintEx(0); \
+    PyErr_Clear(); \
     zerr errargs; \
     return failval
 
