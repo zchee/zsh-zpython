@@ -781,6 +781,7 @@ set_special_string(Param pm, char *val)
 
     args = Py_BuildValue("(O&)", get_string, val);
     r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
 	zerr("Failed to assign value for parameter %s", pm->node.nam);
@@ -801,6 +802,7 @@ set_special_integer(Param pm, zlong val)
 
     args = Py_BuildValue("(L)", (long long) val);
     r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
 	zerr("Failed to assign value for parameter %s", pm->node.nam);
@@ -821,6 +823,7 @@ set_special_float(Param pm, double val)
 
     args = Py_BuildValue("(d)", val);
     r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
 	zerr("Failed to assign value for parameter %s", pm->node.nam);
@@ -848,6 +851,7 @@ set_special_array(Param pm, char **val)
 
     args = Py_BuildValue("(O&)", get_array, val);
     r = PyObject_CallObject(((struct special_data *) pm->u.data)->obj, args);
+    Py_DECREF(args);
     if (!r) {
 	PyErr_PrintEx(0);
 	zerr("Failed to assign value for parameter %s", pm->node.nam);
