@@ -169,7 +169,8 @@ get_hash(HashTable ht)
 
     if(hashdict) {
         PyErr_SetString(PyExc_RuntimeError, "hashdict already used. "
-                "Do not try to get two hashes simultaneously in separate threads");
+                "Do not try to get two hashes simultaneously in "
+                "separate threads, zsh is not thread-safe");
         return NULL;
     }
 
@@ -239,7 +240,8 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
         case PM_SCALAR:
             return get_string(v->pm->gsu.s->getfn(v->pm));
         default:
-            PyErr_SetString(PyExc_SystemError, "Parameter has unknown type; should not happen.");
+            PyErr_SetString(PyExc_SystemError,
+                    "Parameter has unknown type; should not happen.");
             return NULL;
     }
 }
@@ -333,20 +335,23 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         char *s = get_chars(value);
 
         if (!setsparam(name, s)) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to assign string to the parameter");
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Failed to assign string to the parameter");
             zsfree(s);
             return NULL;
         }
     }
     else if (PyInt_Check(value)) {
         if (!setiparam(name, (zlong) PyInt_AsLong(value))) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to assign integer parameter");
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Failed to assign integer parameter");
             return NULL;
         }
     }
     else if (PyLong_Check(value)) {
         if (!setiparam(name, (zlong) PyLong_AsLong(value))) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to assign long parameter");
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Failed to assign long parameter");
             return NULL;
         }
     }
@@ -355,7 +360,8 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         mnval.type = MN_FLOAT;
         mnval.u.d = PyFloat_AsDouble(value);
         if (!setnparam(name, mnval)) {
-            PyErr_SetString(PyExc_RuntimeError, "Failed to assign float parameter");
+            PyErr_SetString(PyExc_RuntimeError,
+                    "Failed to assign float parameter");
             return NULL;
         }
     }
@@ -370,11 +376,13 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 
         while(PyDict_Next(value, &pos, &pkey, &pval)) {
             if(!PyString_Check(pkey)) {
-                PyErr_SetString(PyExc_TypeError, "Only string keys are allowed");
+                PyErr_SetString(PyExc_TypeError,
+                        "Only string keys are allowed");
                 FAIL_SETTING_ARRAY;
             }
             if(!PyString_Check(pval)) {
-                PyErr_SetString(PyExc_TypeError, "Only string values are allowed");
+                PyErr_SetString(PyExc_TypeError,
+                        "Only string values are allowed");
                 FAIL_SETTING_ARRAY;
             }
             *val++ = get_chars(pkey);
@@ -387,8 +395,8 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
             return NULL;
         }
     }
-    /* Python’s list have no faster shortcut methods like PyDict_Next above thus
-     * using more abstract protocol */
+    /* Python's list have no faster shortcut methods like PyDict_Next above
+     * thus using more abstract protocol */
     else if (PySequence_Check(value)) {
         char **ss = get_chars_array(value);
 
@@ -408,7 +416,8 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
         }
     }
     else {
-        PyErr_SetString(PyExc_TypeError, "Cannot assign value of the given type");
+        PyErr_SetString(PyExc_TypeError,
+                "Cannot assign value of the given type");
         return NULL;
     }
 
@@ -525,7 +534,8 @@ get_sh_item_value(Param pm)
     if(!(str = get_chars(string))) {
         Py_DECREF(itemval);
         Py_DECREF(string);
-        ZFAIL_NOFINISH(("Failed to get string from value string object"), ztrdup(""));
+        ZFAIL_NOFINISH(("Failed to get string from value string object"),
+                ztrdup(""));
     }
     Py_DECREF(string);
     Py_DECREF(itemval);
@@ -674,12 +684,14 @@ get_special_string(Param pm)
 
     robj = PyObject_Str(((struct special_data *)pm->u.data)->obj);
     if(!robj) {
-        ZFAIL(("Failed to get value for parameter %s", pm->node.nam), ztrdup(""));
+        ZFAIL(("Failed to get value for parameter %s", pm->node.nam),
+                ztrdup(""));
     }
 
     r = get_chars(robj);
     if(!r) {
-        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), ztrdup(""));
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
+                ztrdup(""));
     }
 
     Py_DECREF(robj);
@@ -745,7 +757,8 @@ get_special_array(Param pm)
 
     r = get_chars_array(robj);
     if(!r) {
-        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam), zshcalloc(sizeof(char **)));
+        ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
+                zshcalloc(sizeof(char **)));
     }
 
     PYTHON_FINISH;
@@ -850,7 +863,7 @@ set_special_array(Param pm, char **val)
 static void
 unset_sh_item(HashNode ht, UNUSED(int flags))
 {
-    struct sh_item_data *sh_data = (struct sh_item_data *) ((Param) ht)->u.data;
+    struct sh_item_data *sh_data = (struct sh_item_data *) ((Param)ht)->u.data;
     PyMapping_DelItem(sh_data->obj, sh_data->item);
 }
 
@@ -907,11 +920,13 @@ set_special_hash(Param pm, HashTable ht)
             }
 
             if(!(valobj = get_string(val))) {
-                ZFAIL(("Failed to convert value \"%s\" to string object while processing key", val, hn->nam), );
+                ZFAIL(("Failed to convert value \"%s\" to string object "
+                            "while processing key", val, hn->nam), );
             }
             if(!(keyobj = get_string(hn->nam))) {
                 Py_DECREF(valobj);
-                ZFAIL(("Failed to convert key \"%s\" to string object", hn->nam), );
+                ZFAIL(("Failed to convert key \"%s\" to string object",
+                            hn->nam), );
             }
 
             if(PyObject_SetItem(obj, keyobj, valobj) == -1) {
@@ -965,7 +980,10 @@ check_special_name(char *name)
                 && (name[7] != '\0')
        ) || !isident(name))
     {
-        PyErr_SetString(PyExc_KeyError, "Invalid special identifier: it must be a valid variable name starting with \"zpython\" (ignoring case)");
+        PyErr_SetString(PyExc_KeyError, "Invalid special identifier: "
+                "it must be a valid variable name starting with "
+                "\"zpython\" (ignoring case) and containing at least one more "
+                "character");
         return 1;
     }
     return 0;
@@ -996,19 +1014,22 @@ set_special_parameter(PyObject *args, int type)
         case PM_EFLOAT:
         case PM_FFLOAT:
             if(!PyNumber_Check(obj)) {
-                PyErr_SetString(PyExc_TypeError, "Object must implement numeric protocol");
+                PyErr_SetString(PyExc_TypeError,
+                        "Object must implement numeric protocol");
                 return NULL;
             }
             break;
         case PM_ARRAY:
             if(!PySequence_Check(obj)) {
-                PyErr_SetString(PyExc_TypeError, "Object must implement sequence protocol");
+                PyErr_SetString(PyExc_TypeError,
+                        "Object must implement sequence protocol");
                 return NULL;
             }
             break;
         case PM_HASHED:
             if(!PyMapping_Check(obj)) {
-                PyErr_SetString(PyExc_TypeError, "Object must implement mapping protocol");
+                PyErr_SetString(PyExc_TypeError,
+                        "Object must implement mapping protocol");
                 return NULL;
             }
             break;
@@ -1222,7 +1243,8 @@ boot_(UNUSED(Module m))
     zpython_subshell = zsh_subshell;
     Py_Initialize();
     PyEval_InitThreads();
-    Py_InitModule4("zsh", ZshMethods, (char *)NULL, (PyObject *)NULL, PYTHON_API_VERSION);
+    Py_InitModule4("zsh", ZshMethods, (char *)NULL, (PyObject *)NULL,
+            PYTHON_API_VERSION);
     globals = PyModule_GetDict(PyImport_AddModule("__main__"));
     PYTHON_SAVE_THREAD;
     return 0;
