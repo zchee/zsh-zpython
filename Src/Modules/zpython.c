@@ -487,31 +487,37 @@ get_sh_item_value(Param pm)
     struct sh_item_data *sh_data = (struct sh_item_data *) pm->u.data;
     PyObject *obj = sh_data->obj;
     PyObject *item = sh_data->item;
+    PyObject *itemval, *string;
+    char *str;
 
-    if(PyMapping_HasKey(obj, item)) {
-        PyObject *itemval, *string;
-        char *str;
-
-        if(!(itemval = PyObject_GetItem(obj, item))) {
-            ZFAIL_NOFINISH(("Failed to convert value to string object"), ztrdup(""));
+    if(!(itemval = PyObject_GetItem(obj, item))) {
+        if(PyErr_Occurred()) {
+            /* Expected result: key not found */
+            if(PyErr_ExceptionMatches(PyExc_KeyError)) {
+                PyErr_Clear();
+                return ztrdup("");
+            }
+            /* Unexpected result: unknown exception */
+            else
+                ZFAIL_NOFINISH(("Failed to get value object"), ztrdup(""));
         }
-
-        if(!(string = PyObject_Str(itemval))) {
-            Py_DECREF(itemval);
-            ZFAIL_NOFINISH(("Failed to get value string object"), ztrdup(""));
-        }
-
-        if(!(str = get_chars(string))) {
-            Py_DECREF(itemval);
-            Py_DECREF(string);
-            ZFAIL_NOFINISH(("Failed to get string from value string object"), ztrdup(""));
-        }
-        Py_DECREF(string);
-        Py_DECREF(itemval);
-        return str;
+        else
+            return ztrdup("");
     }
-    else
-        return ztrdup("");
+
+    if(!(string = PyObject_Str(itemval))) {
+        Py_DECREF(itemval);
+        ZFAIL_NOFINISH(("Failed to get value string object"), ztrdup(""));
+    }
+
+    if(!(str = get_chars(string))) {
+        Py_DECREF(itemval);
+        Py_DECREF(string);
+        ZFAIL_NOFINISH(("Failed to get string from value string object"), ztrdup(""));
+    }
+    Py_DECREF(string);
+    Py_DECREF(itemval);
+    return str;
 }
 
 static char *
