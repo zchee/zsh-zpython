@@ -207,42 +207,42 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 	return NULL;
     }
 
-    switch(PM_TYPE(v->pm->node.flags)) {
-	case PM_HASHED:
-	    return get_hash(v->pm->gsu.h->getfn(v->pm));
-	case PM_ARRAY:
-	    v->arr = v->pm->gsu.a->getfn(v->pm);
-	    if (v->isarr) {
-		return get_array(v->arr);
-	    }
-	    else {
-		char *s;
-		PyObject *str, *r;
+    switch (PM_TYPE(v->pm->node.flags)) {
+    case PM_HASHED:
+	return get_hash(v->pm->gsu.h->getfn(v->pm));
+    case PM_ARRAY:
+	v->arr = v->pm->gsu.a->getfn(v->pm);
+	if (v->isarr) {
+	    return get_array(v->arr);
+	}
+	else {
+	    char *s;
+	    PyObject *str, *r;
 
-		if (v->start < 0)
-		    v->start += arrlen(v->arr);
-		s = (v->start >= arrlen(v->arr) || v->start < 0) ?
-		    (char *) "" : v->arr[v->start];
-		if (!(str = get_string(s)))
-		    return NULL;
-		r = PyList_New(1);
-		if (PyList_SetItem(r, 0, str) == -1) {
-		    Py_DECREF(r);
-		    return NULL;
-		}
-		return r;
+	    if (v->start < 0)
+		v->start += arrlen(v->arr);
+	    s = (v->start >= arrlen(v->arr) || v->start < 0) ?
+		(char *) "" : v->arr[v->start];
+	    if (!(str = get_string(s)))
+		return NULL;
+	    r = PyList_New(1);
+	    if (PyList_SetItem(r, 0, str) == -1) {
+		Py_DECREF(r);
+		return NULL;
 	    }
-	case PM_INTEGER:
-	    return PyLong_FromLong((long) v->pm->gsu.i->getfn(v->pm));
-	case PM_EFLOAT:
-	case PM_FFLOAT:
-	    return PyFloat_FromDouble(v->pm->gsu.f->getfn(v->pm));
-	case PM_SCALAR:
-	    return get_string(v->pm->gsu.s->getfn(v->pm));
-	default:
-	    PyErr_SetString(PyExc_SystemError,
-		    "Parameter has unknown type; should not happen.");
-	    return NULL;
+	    return r;
+	}
+    case PM_INTEGER:
+	return PyLong_FromLong((long) v->pm->gsu.i->getfn(v->pm));
+    case PM_EFLOAT:
+    case PM_FFLOAT:
+	return PyFloat_FromDouble(v->pm->gsu.f->getfn(v->pm));
+    case PM_SCALAR:
+	return get_string(v->pm->gsu.s->getfn(v->pm));
+    default:
+	PyErr_SetString(PyExc_SystemError,
+		"Parameter has unknown type; should not happen.");
+	return NULL;
     }
 }
 
@@ -1007,32 +1007,32 @@ set_special_parameter(PyObject *args, int type)
     if (check_special_name(name))
 	return NULL;
 
-    switch(type) {
-	case PM_SCALAR:
-	    break;
-	case PM_INTEGER:
-	case PM_EFLOAT:
-	case PM_FFLOAT:
-	    if (!PyNumber_Check(obj)) {
-		PyErr_SetString(PyExc_TypeError,
-			"Object must implement numeric protocol");
-		return NULL;
-	    }
-	    break;
-	case PM_ARRAY:
-	    if (!PySequence_Check(obj)) {
-		PyErr_SetString(PyExc_TypeError,
-			"Object must implement sequence protocol");
-		return NULL;
-	    }
-	    break;
-	case PM_HASHED:
-	    if (!PyMapping_Check(obj)) {
-		PyErr_SetString(PyExc_TypeError,
-			"Object must implement mapping protocol");
-		return NULL;
-	    }
-	    break;
+    switch (type) {
+    case PM_SCALAR:
+	break;
+    case PM_INTEGER:
+    case PM_EFLOAT:
+    case PM_FFLOAT:
+	if (!PyNumber_Check(obj)) {
+	    PyErr_SetString(PyExc_TypeError,
+		    "Object must implement numeric protocol");
+	    return NULL;
+	}
+	break;
+    case PM_ARRAY:
+	if (!PySequence_Check(obj)) {
+	    PyErr_SetString(PyExc_TypeError,
+		    "Object must implement sequence protocol");
+	    return NULL;
+	}
+	break;
+    case PM_HASHED:
+	if (!PyMapping_Check(obj)) {
+	    PyErr_SetString(PyExc_TypeError,
+		    "Object must implement mapping protocol");
+	    return NULL;
+	}
+	break;
     }
 
     if (type == PM_HASHED) {
@@ -1067,35 +1067,35 @@ set_special_parameter(PyObject *args, int type)
     if (type != PM_HASHED)
 	pm->u.data = data;
 
-    switch(type) {
-	case PM_SCALAR:
-	    pm->gsu.s = &special_string_gsu;
+    switch (type) {
+    case PM_SCALAR:
+	pm->gsu.s = &special_string_gsu;
+	break;
+    case PM_INTEGER:
+	pm->gsu.i = &special_integer_gsu;
+	break;
+    case PM_EFLOAT:
+    case PM_FFLOAT:
+	pm->gsu.f = &special_float_gsu;
+	break;
+    case PM_ARRAY:
+	pm->gsu.a = &special_array_gsu;
+	break;
+    case PM_HASHED:
+	{
+	    struct obj_hash_node *ohn;
+	    HashTable ht = pm->u.hash;
+	    ohn = PyMem_New(struct obj_hash_node, 1);
+	    ohn->nam = ztrdup("obj");
+	    ohn->obj = obj;
+	    zfree(ht->nodes, ht->hsize * sizeof(HashNode *));
+	    ht->nodes = zshcalloc(1 * sizeof(HashNode *));
+	    ht->hsize = 1;
+	    *ht->nodes = (struct hashnode *) ohn;
+	    pm->gsu.h = &special_hash_gsu;
+	    ht->freenode = free_sh_node;
 	    break;
-	case PM_INTEGER:
-	    pm->gsu.i = &special_integer_gsu;
-	    break;
-	case PM_EFLOAT:
-	case PM_FFLOAT:
-	    pm->gsu.f = &special_float_gsu;
-	    break;
-	case PM_ARRAY:
-	    pm->gsu.a = &special_array_gsu;
-	    break;
-	case PM_HASHED:
-	    {
-		struct obj_hash_node *ohn;
-		HashTable ht = pm->u.hash;
-		ohn = PyMem_New(struct obj_hash_node, 1);
-		ohn->nam = ztrdup("obj");
-		ohn->obj = obj;
-		zfree(ht->nodes, ht->hsize * sizeof(HashNode *));
-		ht->nodes = zshcalloc(1 * sizeof(HashNode *));
-		ht->hsize = 1;
-		*ht->nodes = (struct hashnode *) ohn;
-		pm->gsu.h = &special_hash_gsu;
-		ht->freenode = free_sh_node;
-		break;
-	    }
+	}
     }
 
     Py_RETURN_NONE;
