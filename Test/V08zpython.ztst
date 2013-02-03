@@ -1,0 +1,205 @@
+%prep
+  if ( zmodload -i zsh/zpython ) >/dev/null 2>&1; then
+    zmodload -i zsh/zpython
+    zpython 'import zsh, sys, os'
+    zpython 'sys.path.append(os.getcwd())'
+    zpython 'from ztstutil import *'
+  else
+    ZTST_unimplemented="The module zsh/zpython is not available"
+  fi
+%test
+  zpython 'print "Test stdout"'
+0:Stdout test
+>Test stdout
+
+  zpython 'import sys; sys.stderr.write("Test stderr\n")'
+0:Stderr test
+?Test stderr
+
+  zpython 'raise NotImplementedError()'
+1:Exception test
+*?*
+?*
+?NotImplementedError
+
+  (exit 5)
+  zpython 'print zsh.last_exit_code()'
+0:Last exit code
+>5
+
+  function e() { return $1 }
+  e 5 | e 6 | e 7
+  zpython 'print " ".join((repr(i) for i in zsh.pipestatus()))'
+0:Pipe status
+>5 6 7
+
+  echo ABC-$ABC
+  zpython 'zsh.eval("ABC=2")'
+  echo ABC-$ABC
+0:zsh.eval
+>ABC-
+>ABC-2
+
+  zpython 'print zsh.subshell()'
+0:Subshell test
+>0
+
+  STRING=abc
+  integer INT=5
+  float FLOAT=10.5
+  typeset -a ARRAY
+  ARRAY=(a b c d)
+  typeset -A HASH
+  HASH=(a b c d)
+  zpython 'print repr(zsh.getvalue("STRING"))'
+  zpython 'print repr(zsh.getvalue("INT"))'
+  zpython 'print repr(zsh.getvalue("FLOAT"))'
+  zpython 'print repr(zsh.getvalue("ARRAY"))'
+  zpython 'print repr(sorted(zsh.getvalue("HASH").items()))'
+0:getvalue test
+>'abc'
+>5L
+>10.5
+>['a', 'b', 'c', 'd']
+>[('a', 'b'), ('c', 'd')]
+
+  zpython 'zsh.setvalue("STRING", "def")'
+  zpython 'zsh.setvalue("INT", 3)'
+  zpython 'zsh.setvalue("INT2", 4L)'
+  zpython 'zsh.setvalue("FLOAT", 5.0)'
+  zpython 'zsh.setvalue("ARRAY", [str(i) for i in range(5)])'
+  zpython 'zsh.setvalue("DICT", {"a": "b", "c": "d"})'
+  echo $STRING
+  echo $INT
+  echo $INT2
+  printf "%.3f\\n" $FLOAT
+  echo $ARRAY
+  echo ${(kv)DICT}
+0:setvalue test
+>def
+>3
+>4
+>5.000
+>0 1 2 3 4
+>a b c d
+
+  zpython 'zsh.set_special_string("ZPYTHON_STRING", Str())'
+  zpython 'zsh.set_special_string("ZPYTHON_STRING2", CStr())'
+  echo $ZPYTHON_STRING
+  echo $ZPYTHON_STRING
+  echo $ZPYTHON_STRING2
+  ZPYTHON_STRING2=20
+  echo $ZPYTHON_STRING2
+  ZPYTHON_STRING2+=2
+  echo $ZPYTHON_STRING2
+0:set_special_string test
+>1
+>2
+>1
+>-18
+>156
+
+  zpython 'zsh.set_special_integer("ZPYTHON_INT", Int())'
+  zpython 'zsh.set_special_integer("ZPYTHON_INT2", CInt())'
+  echo $ZPYTHON_INT
+  echo $ZPYTHON_INT2
+  echo $ZPYTHON_INT2
+  ZPYTHON_INT2=8
+  echo $ZPYTHON_INT2
+  ZPYTHON_INT2+=0
+  echo $ZPYTHON_INT2
+0:set_special_integer test
+>4
+>4
+>16
+>8
+>4
+
+  zpython 'zsh.set_special_float("ZPYTHON_FLOAT", Float())'
+  zpython 'zsh.set_special_float("ZPYTHON_FLOAT2", CFloat())'
+  printf "%.3f\\n" $ZPYTHON_FLOAT
+  printf "%.3f\\n" $ZPYTHON_FLOAT2
+  printf "%.3f\\n" $ZPYTHON_FLOAT2
+  ZPYTHON_FLOAT2=3
+  printf "%.3f\\n" $ZPYTHON_FLOAT2
+  ZPYTHON_FLOAT2+=-4
+  printf "%.3f\\n" $ZPYTHON_FLOAT2
+0:set_special_integer test
+>2.000
+>2.000
+>4.000
+>2.000
+>8.000
+
+  zpython 'zsh.set_special_array("ZPYTHON_ARRAY", Array())'
+  zpython 'zsh.set_special_array("ZPYTHON_ARRAY2", CArray())'
+  zpython 'zsh.set_special_array("ZPYTHON_ARRAY3", CArray())'
+  echo $ZPYTHON_ARRAY
+  echo $ZPYTHON_ARRAY
+  ZPYTHON_ARRAY2+=(a b)
+  echo $ZPYTHON_ARRAY2
+  ZPYTHON_ARRAY3=(c d)
+  echo $ZPYTHON_ARRAY3
+0:set_special_array
+>len:1
+>len:1 get:0 len:3
+>len:1 get:0 len:3 get:0 get:1 get:2 set:len:1|a|b|len:3 len:8
+>set:c|d len:2
+
+  zpython 'zsh.set_special_hash("ZPYTHON_HASH", {"a": "b"})'
+  echo ${(kv)ZPYTHON_HASH}
+  echo ${(k)ZPYTHON_HASH}
+  echo ${(v)ZPYTHON_HASH}
+  echo $ZPYTHON_HASH[a]
+  echo $ZPYTHON_HASH[b]
+  echo ${ZPYTHON_HASH}
+  ZPYTHON_HASH=(def abc)
+  echo ${(kv)ZPYTHON_HASH}
+  ZPYTHON_HASH+=(abc def)
+  echo ${(kv)ZPYTHON_HASH}
+0:set_special_hash: dictionary
+>a b
+>a
+>b
+>b
+>
+>b
+>def abc
+>abc def def abc
+
+  zpython 'zsh.set_special_hash("ZPYTHON_HASH2", Hash())'
+  echo $ZPYTHON_HASH2
+  echo $ZPYTHON_HASH2[a]
+  echo $ZPYTHON_HASH2[c]
+  ZPYTHON_HASH2[b]=d
+  echo $ZPYTHON_HASH2[acc]
+  ZPYTHON_HASH2=(b d)
+  echo $ZPYTHON_HASH2
+  ZPYTHON_HASH2+=(b def)
+  echo $ZPYTHON_HASH2[b]
+0:set_special_hash: Hash
+>i*2;[acc] b
+>b
+>None
+>i*2;[acc];[a]*3;[c]*2;[b];[b]=d;[acc]*2
+>i*2;[acc];[a]*3;[c]*2;[b];[b]=d;[acc]*2;k;![a];![b];[b]=d;i*2;[acc] d
+>def
+
+  zmodload -u zsh/zpython
+  for v in ZPYTHON_{{STRING,INT,FLOAT,ARRAY,HASH}{,2},ARRAY3} ; do
+    echo ${v}:${(P)v}
+  done
+0:Module unloading
+>ZPYTHON_STRING:
+>ZPYTHON_STRING2:
+>ZPYTHON_INT:
+>ZPYTHON_INT2:
+>ZPYTHON_FLOAT:
+>ZPYTHON_FLOAT2:
+>ZPYTHON_ARRAY:
+>ZPYTHON_ARRAY2:
+>ZPYTHON_HASH:
+>ZPYTHON_HASH2:
+>ZPYTHON_ARRAY3:
+
+%clean
