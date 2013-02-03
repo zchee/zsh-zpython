@@ -47,8 +47,6 @@ after_fork()
 	return failval; \
     } \
  \
-    PyObject *result; \
- \
     PYTHON_RESTORE_THREAD
 
 #define PYTHON_FINISH \
@@ -58,9 +56,10 @@ after_fork()
 static int
 do_zpython(char *nam, char **args, Options ops, int func)
 {
-    PYTHON_INIT(2);
-
+    PyObject *result;
     int exit_code = 0;
+
+    PYTHON_INIT(2);
 
     result = PyRun_String(*args, Py_file_input, globals, globals);
     if (result == NULL)
