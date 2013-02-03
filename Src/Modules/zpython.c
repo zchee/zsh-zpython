@@ -1142,27 +1142,27 @@ static struct PyMethodDef ZshMethods[] = {
     {"subshell", ZshSubshell, 0, "Get subshell recursion depth. Returns an int"},
     {"getvalue", ZshGetValue, 1,
 	"Get parameter value. Return types:\n"
-	"  str		    for scalars\n"
-	"  long		    for integer numbers\n"
-	"  float	    for floating-point numbers\n"
-	"  list [str]	    for array parameters\n"
+	"  str              for scalars\n"
+	"  long             for integer numbers\n"
+	"  float            for floating-point numbers\n"
+	"  list [str]       for array parameters\n"
 	"  dict {str : str} for associative arrays\n"
 	"Throws KeyError   if identifier is invalid,\n"
-	"	IndexError if parameter was not found\n"
+	"       IndexError if parameter was not found\n"
     },
     {"setvalue", ZshSetValue, 2,
 	"Set parameter value. Use None to unset. Supported objects and corresponding\n"
 	"zsh parameter types:\n"
-	"  str		     sets string scalars\n"
-	"  long or int	     sets integer numbers\n"
-	"  float	     sets floating-point numbers. Output is in scientific notation\n"
+	"  str               sets string scalars\n"
+	"  long or int       sets integer numbers\n"
+	"  float             sets floating-point numbers. Output is in scientific notation\n"
 	"  sequence of str   sets array parameters (sequence = anything implementing\n"
-	"		     sequence protocol)\n"
+	"                    sequence protocol)\n"
 	"  dict {str : str}  sets hashes\n"
 	"Throws KeyError     if identifier is invalid,\n"
-	"	RuntimeError if zsh set?param/unsetparam function failed,\n"
-	"	ValueError   if sequence item or dictionary key or value are not str\n"
-	"			or sequence size is not known."},
+	"       RuntimeError if zsh set?param/unsetparam function failed,\n"
+	"       ValueError   if sequence item or dictionary key or value are not str\n"
+	"                       or sequence size is not known."},
     {"set_special_string", ZshSetMagicString, 2,
 	"Define scalar (string) parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
