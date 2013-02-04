@@ -904,7 +904,7 @@ set_special_hash(Param pm, HashTable ht)
     int i;
     HashNode hn;
     PyObject *obj = ((struct obj_hash_node *) (*pm->u.hash->nodes))->obj;
-    PyObject *keys, *iter, *item;
+    PyObject *keys, *iter, *keyobj;
 
     if (pm->u.hash == ht)
 	return;
@@ -928,11 +928,11 @@ set_special_hash(Param pm, HashTable ht)
     if (!(iter = PyObject_GetIter(keys))) {
 	ZFAIL(("Failed to get keys iterator"), );
     }
-    while ((item = PyIter_Next(iter))) {
-	if (PyMapping_DelItem(obj, item) == -1) {
+    while ((keyobj = PyIter_Next(iter))) {
+	if (PyMapping_DelItem(obj, keyobj) == -1) {
 	    ZFAIL(("Failed to delete some key"), );
 	}
-	Py_DECREF(item);
+	Py_DECREF(keyobj);
     }
     Py_DECREF(iter);
     Py_DECREF(keys);
@@ -985,8 +985,25 @@ unsetfn(Param pm, int exp)
 static void
 free_sh_node(HashNode nodeptr)
 {
-    zsfree(nodeptr->nam);
-    PyMem_Free(nodeptr);
+    /* Param is obtained from get_sh_item */
+    Param pm = (Param) nodeptr;
+    struct sh_key_data *sh_kdata = (struct sh_key_data *) pm->u.data;
+    PyObject *keyobj;
+
+    PYTHON_INIT();
+
+    if (!(keyobj = get_string(sh_kdata->key))) {
+	ZFAIL(("While unsetting key %s of parameter %s failed to get "
+		    "key string object", sh_kdata->key, pm->node.nam), );
+    }
+    if (PyMapping_DelItem(sh_kdata->obj, keyobj) == -1) {
+	Py_DECREF(keyobj);
+	ZFAIL(("Failed to delete key %s of parameter %s",
+		    sh_kdata->key, pm->node.nam), );
+    }
+    Py_DECREF(keyobj);
+
+    PYTHON_FINISH;
 }
 
 static const struct gsu_scalar special_string_gsu =
@@ -1004,7 +1021,7 @@ static int
 check_special_name(char *name)
 {
     /* Needing strncasecmp, but the one that ignores locale */
-    if (!(	   (name[0] == 'z' || name[0] == 'Z')
+    if (!(         (name[0] == 'z' || name[0] == 'Z')
 		&& (name[1] == 'p' || name[1] == 'P')
 		&& (name[2] == 'y' || name[2] == 'Y')
 		&& (name[3] == 't' || name[3] == 'T')
