@@ -616,8 +616,7 @@ set_sh_key_value(Param pm, char *val)
     key = sh_kdata->key;
 
     if (!(keyobj = get_string(key))) {
-	ZFAIL(("Failed to create key string object for key \"%s\"", key),
-		dupstring(""));
+	ZFAIL(("Failed to create key string object for key \"%s\"", key), );
     }
     set_sh_item_value(obj, keyobj, val);
     Py_DECREF(keyobj);
@@ -672,7 +671,7 @@ scan_special_hash(HashTable ht, ScanFunc func, int flags)
     struct param pm;
 
     memset((void *) &pm, 0, sizeof(struct param));
-    pm.node.flags = PM_SCALAR | PM_READONLY;
+    pm.node.flags = PM_SCALAR;
     pm.gsu.s = &sh_keyobj_gsu;
 
     PYTHON_INIT();
@@ -1036,9 +1035,6 @@ set_special_parameter(PyObject *args, int type)
 
     if (!PyArg_ParseTuple(args, "sO", &name, &obj))
 	return NULL;
-
-    if (type!=PM_HASHED && !PyCallable_Check(obj))
-	flags |= PM_READONLY;
 
     if (check_special_name(name))
 	return NULL;
