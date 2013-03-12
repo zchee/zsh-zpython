@@ -43,12 +43,11 @@ after_fork()
 }
 
 #define PYTHON_INIT(failval) \
-    if (zsh_subshell > zpython_subshell) { \
-	zerr("Launching python in subshells is not supported"); \
-	return failval; \
-    } \
+    PYTHON_RESTORE_THREAD; \
  \
-    PYTHON_RESTORE_THREAD
+    if (zsh_subshell > zpython_subshell) { \
+	after_fork(); \
+    }
 
 #define PYTHON_FINISH \
     PYTHON_SAVE_THREAD
