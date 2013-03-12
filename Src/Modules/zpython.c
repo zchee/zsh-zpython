@@ -50,6 +50,8 @@ after_fork()
     }
 
 #define PYTHON_FINISH \
+    fflush(stderr); \
+    fflush(stdout); \
     PYTHON_SAVE_THREAD
 
 /**/
@@ -248,30 +250,30 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
 typedef void *(*Allocator) (size_t);
 
 static char *
-get_chars(PyObject *str, Allocator alloc)
+get_chars(PyObject *string, Allocator alloc)
 {
-    char *val, *buf, *bufstart;
+    char *str, *buf, *bufstart;
     Py_ssize_t len = 0;
     Py_ssize_t i = 0;
     Py_ssize_t buflen = 1;
 
-    if (PyString_AsStringAndSize(str, &val, &len) == -1)
+    if (PyString_AsStringAndSize(string, &str, &len) == -1)
 	return NULL;
 
     while (i < len)
-	buflen += 1 + (imeta(val[i++]) ? 1 : 0);
+	buflen += 1 + (imeta(str[i++]) ? 1 : 0);
 
     buf = alloc(buflen * sizeof(char));
     bufstart = buf;
 
     while (len) {
-	if (imeta(*val)) {
+	if (imeta(*str)) {
 	    *buf++ = Meta;
-	    *buf++ = *val ^ 32;
+	    *buf++ = *str ^ 32;
 	}
 	else
-	    *buf++ = *val;
-	val++;
+	    *buf++ = *str;
+	str++;
 	len--;
     }
     *buf = '\0';
