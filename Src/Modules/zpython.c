@@ -6,6 +6,12 @@
 #define PYTHON_RESTORE_THREAD PyEval_RestoreThread(saved_python_thread); \
 			      saved_python_thread = NULL
 
+#if PY_MAJOR_VERSION >= 3
+# define PyString_Check             PyBytes_Check
+# define PyString_FromStringAndSize PyBytes_FromStringAndSize
+# define PyString_AsStringAndSize   PyBytes_AsStringAndSize
+#endif
+
 struct specialparam {
     char *name;
     Param pm;
@@ -1257,6 +1263,20 @@ static struct PyMethodDef ZshMethods[] = {
     {NULL, NULL, 0, NULL},
 };
 
+#if PY_MAJOR_VERSION >= 3
+static struct PyModuleDef zshmodule = {
+    PyModuleDef_HEAD_INIT,
+    "zsh",      /* Module name */
+    NULL,       /* Module documentation */
+    -1,         /* Size of additional memory needed (no memory needed) */
+    ZshMethods, /* Module methods */
+    NULL,       /* Unused, should be null. Name: m_reload, type: inquiry */
+    NULL,       /* A traversal function to call during GC traversal */
+    NULL,       /* A clear function to call during GC clearing */
+    NULL,       /* A function to call during deallocation */
+};
+#endif
+
 static struct builtin bintab[] = {
     BUILTIN("zpython", 0, do_zpython,  1, 1, 0, NULL, NULL),
 };
@@ -1298,7 +1318,11 @@ boot_(UNUSED(Module m))
     zpython_subshell = zsh_subshell;
     Py_Initialize();
     PyEval_InitThreads();
+#if PY_MAJOR_VERSION >= 3
+    PyModule_Create(&zshmodule);
+#else
     Py_InitModule3("zsh", ZshMethods, (char *) NULL);
+#endif
     globals = PyModule_GetDict(PyImport_AddModule("__main__"));
     PYTHON_SAVE_THREAD;
     return 0;

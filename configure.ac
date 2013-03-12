@@ -2644,21 +2644,23 @@ if test x$zpython = xyes; then
         AC_PATH_PROGS(zsh_cv_path_python, python2 python)
     fi
     AC_CACHE_CHECK(Python version, zsh_cv_python_version,
-    [[zsh_cv_python_version=`${zsh_cv_path_python} -c 'import sys; print sys.version[:3]'`]])
+    [[zsh_cv_python_version=`${zsh_cv_path_python} -c 'import sys; print(sys.version[:3])'`]])
     AC_CACHE_CHECK(Python install prefix, zsh_cv_path_python_pfx,
-    [zsh_cv_path_python_pfx=`${zsh_cv_path_python} -c 'import sys; print sys.prefix'`])
+    [zsh_cv_path_python_pfx=`${zsh_cv_path_python} -c 'import sys; print(sys.prefix)'`])
     AC_CACHE_CHECK(Python execution prefix, zsh_cv_path_python_epfx,
-    [zsh_cv_path_python_epfx=`${zsh_cv_path_python} -c 'import sys; print sys.exec_prefix'`])
+    [zsh_cv_path_python_epfx=`${zsh_cv_path_python} -c 'import sys; print(sys.exec_prefix)'`])
     AC_CACHE_VAL(zsh_cv_path_pythonpath,
-    [zsh_cv_path_pythonpath=`unset PYTHONPATH;${zsh_cv_path_python} -c 'import sys; print ":".join(sys.path)'`])
+    [zsh_cv_path_pythonpath=`unset PYTHONPATH;${zsh_cv_path_python} -c 'import sys; print(":".join(sys.path))'`])
     AC_CACHE_CHECK(Python configuration directory, zsh_cv_path_python_conf,
     [zsh_cv_path_python_conf=
      for path in "${zsh_cv_path_python_pfx}" "${zsh_cv_path_python_epfx}" ; do
          for subdir in lib64 lib share ; do
              d="${path}/${subdir}/python${zsh_cv_python_version}/config"
-             if test -d "$d" && test -f "$d/config.c"; then
-                 zsh_cv_path_python_conf="$d"
-             fi
+             for dir in "${d}" "${d}-${zsh_cv_python_version}" ; do
+                 if test -d "${dir}" && test -f "${dir}/config.c"; then
+                     zsh_cv_path_python_conf="${dir}"
+                 fi
+             done
          done
      done])
     PYTHON_CONFDIR="${zsh_cv_path_python_conf}"
