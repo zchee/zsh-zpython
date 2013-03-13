@@ -27,6 +27,8 @@ class Int(NBase):
         self.i*=4
         return int(self.i)
 
+    __int__ = __long__
+
 class CInt(Int):
     def __call__(self, i):
         self.i/=i
@@ -133,6 +135,8 @@ class EHash3(object):
 class ENum(float):
     def __long__(self):
         raise IndexError()
+
+    __int__ = __long__
 
     def __float__(self):
         raise KeyError()

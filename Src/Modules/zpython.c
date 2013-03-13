@@ -581,6 +581,7 @@ unset_special_parameter(struct special_data *data)
 
 #define ZFAIL_NOFINISH(errargs, failval) \
     PyErr_PrintEx(0); \
+    flush_io(); \
     zerr errargs; \
     return failval
 

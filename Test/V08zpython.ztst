@@ -187,28 +187,6 @@
 >i*2;[acc];[a]*3;[c]*2;[b];[b]=d;[acc]*2;k;![a];![b];[b]=d;i*2;[acc] d
 >def
 
-  zmodload -u zsh/zpython
-  for v in ZPYTHON_{{STRING,INT,FLOAT,ARRAY,HASH}{,2},ARRAY3} ; do
-    echo ${v}:${(P)v}
-  done
-# Ignoring stderr is needed for python with memory debugging enabled
-0D:Module unloading
->ZPYTHON_STRING:
->ZPYTHON_STRING2:
->ZPYTHON_INT:
->ZPYTHON_INT2:
->ZPYTHON_FLOAT:
->ZPYTHON_FLOAT2:
->ZPYTHON_ARRAY:
->ZPYTHON_ARRAY2:
->ZPYTHON_HASH:
->ZPYTHON_HASH2:
->ZPYTHON_ARRAY3:
-
-  zmodload -i zsh/zpython
-  zpython 'import zsh, sys, os'
-  zpython 'sys.path.append(os.getcwd())'
-  zpython 'from ztstutil import *'
   zpython 'zsh.set_special_hash("zpython_hsh", EHash())'
   zpython 'zsh.getvalue("NOT AN IDENTIFIER")'
   zpython 'zsh.getvalue("XXX_UNKNOWN_PARAMETER")'
@@ -418,23 +396,23 @@
 ?KeyError
 ?*:1:*create float object*
 # zpython_str=""
+?*:1:*assign value for string*
 ?Traceback*
 ?*
 ?*
 ?KeyError
-?*:1:*assign value for string*
 # zpython_int=2
-?Traceback*
+?(Traceback*|*:1:*assign value for integer*)
+?(*|Traceback*)
 ?*
-?*
-?ValueError
-?*:1:*assign value for integer*
+?(ValueError|*)
+?(*:1:*assign value for integer*|ValueError)
 # zpython_flt=2
-?Traceback*
+?(Traceback*|*:1:*assign value for float*)
+?(*|Traceback*)
 ?*
-?*
-?ValueError
-?*:1:*assign value for float*
+?(ValueError|*)
+?(*:1:*assign value for float*|ValueError)
 
   zpython 'zsh.set_special_array("zpython_arr", EArray())'
   exe 'echo $zpython_arr'
@@ -444,11 +422,11 @@
 *?ValueError:*
 ?*:1:*create array*
 # zpython_arr=(a b c)
-?Traceback*
+?(Traceback*|*:1:*assign value for array*)
+?(*|Traceback*)
 ?*
-?*
-?IndexError
-?*:1:*assign value for array*
+?(IndexError|*)
+?(*:1:*assign value for array*|IndexError)
 
   zpython 'zsh.setvalue("NULL_STRING", "\0")'
   echo $(( #NULL_STRING ))
@@ -474,7 +452,7 @@
 >\[(|b)'\\x00', (|b)'a\\x00b'\]
 >{(|b)'\\x00a\\x00': (|b)'b\\x00a'}
 
-  zpython 'zsh.set_special_hash("ZPYTHON_DICT", {"a": "b", "c": "d"})'
+  zpython 'zsh.set_special_hash("ZPYTHON_DICT", {"a": "b", "c": "d"} if sys.version_info < (3,) else {b"a": b"b", b"c": b"d"})'
   zpython 'zsh.set_special_string("ZPYTHON_USTR", UStr())'
   unset 'ZPYTHON_DICT[a]'
   echo "${(kv)ZPYTHON_DICT}"
@@ -482,5 +460,27 @@
 0:unsets
 >c d
 ?abc
+
+
+  zmodload -u zsh/zpython
+  for v in ZPYTHON_{{STRING,INT,FLOAT,ARRAY,HASH}{,2},ARRAY3} ; do
+    echo ${v}:${(P)v}
+  done
+# Ignoring stderr is needed for python with memory debugging enabled
+0D:Module unloading
+>ZPYTHON_STRING:
+>ZPYTHON_STRING2:
+>ZPYTHON_INT:
+>ZPYTHON_INT2:
+>ZPYTHON_FLOAT:
+>ZPYTHON_FLOAT2:
+>ZPYTHON_ARRAY:
+>ZPYTHON_ARRAY2:
+>ZPYTHON_HASH:
+>ZPYTHON_HASH2:
+>ZPYTHON_ARRAY3:
+
+  zmodload -i zsh/zpython
+0: Module was loaded
 
 %clean
