@@ -2,15 +2,14 @@
 #include "zpython.pro"
 #include <Python.h>
 
-#define PYTHON_SAVE_THREAD saved_python_thread = PyEval_SaveThread()
-#define PYTHON_RESTORE_THREAD PyEval_RestoreThread(saved_python_thread); \
-			      saved_python_thread = NULL
-
 #if PY_MAJOR_VERSION >= 3
 # define PyString_Check             PyBytes_Check
 # define PyString_FromStringAndSize PyBytes_FromStringAndSize
 # define PyString_AsStringAndSize   PyBytes_AsStringAndSize
 #endif
+
+#define PYTHON_SAVE_THREAD PyGILState_Release(pygilstate)
+#define PYTHON_RESTORE_THREAD pygilstate = PyGILState_Ensure()
 
 struct specialparam {
     char *name;
@@ -32,12 +31,12 @@ struct obj_hash_node {
     struct specialparam *sp;
 };
 
-static PyThreadState *saved_python_thread = NULL;
 static PyObject *globals;
 static zlong zpython_subshell;
 static PyObject *hashdict = NULL;
 static struct specialparam *first_assigned_param = NULL;
 static struct specialparam *last_assigned_param = NULL;
+static PyGILState_STATE pygilstate = PyGILState_UNLOCKED;
 
 
 static void
@@ -55,9 +54,45 @@ after_fork()
 	after_fork(); \
     }
 
+#if PY_MAJOR_VERSION >= 3
+static void
+run_flush(PyObject *err)
+{
+    PyObject *flush, *ret;
+
+    if (!err)
+	return;
+
+    if (!(flush = PyObject_GetAttrString(err, "flush"))) {
+	PyErr_Clear();
+	return;
+    }
+
+    if (!(ret = PyObject_CallObject(flush, NULL))) {
+	PyErr_Clear();
+	Py_DECREF(flush);
+	return;
+    }
+
+    Py_DECREF(ret);
+    Py_DECREF(flush);
+}
+#endif
+
+static void
+flush_io()
+{
+#if PY_MAJOR_VERSION >= 3
+    run_flush(PySys_GetObject("stderr"));
+    run_flush(PySys_GetObject("stdout"));
+#else
+    fflush(stderr);
+    fflush(stdout);
+#endif
+}
+
 #define PYTHON_FINISH \
-    fflush(stderr); \
-    fflush(stdout); \
+    flush_io(); \
     PYTHON_SAVE_THREAD
 
 /**/
@@ -85,15 +120,69 @@ do_zpython(char *nam, char **args, Options ops, int func)
     return exit_code;
 }
 
+typedef void *(*Allocator) (size_t);
+
+static char *
+get_chars(PyObject *string, Allocator alloc)
+{
+    char *str, *buf, *bufstart;
+    Py_ssize_t len = 0;
+    Py_ssize_t i = 0;
+    Py_ssize_t buflen = 1;
+
+    if (PyString_Check(string)) {
+	if (PyString_AsStringAndSize(string, &str, &len) == -1)
+	    return NULL;
+    }
+    else {
+#if defined(PY_VERSION_HEX) && PY_VERSION_HEX >= 0x03030000
+	if (!(str = PyUnicode_AsUTF8AndSize(string, &len)))
+	    return NULL;
+#else
+	PyObject *bytes;
+	if (!(bytes = PyUnicode_AsUTF8String(string)))
+	    return NULL;
+
+	if (PyString_AsStringAndSize(bytes, &str, &len) == -1) {
+	    Py_DECREF(bytes);
+	    return NULL;
+	}
+	Py_DECREF(bytes);
+#endif
+    }
+
+    while (i < len)
+	buflen += 1 + (imeta(str[i++]) ? 1 : 0);
+
+    buf = alloc(buflen * sizeof(char));
+    bufstart = buf;
+
+    while (len) {
+	if (imeta(*str)) {
+	    *buf++ = Meta;
+	    *buf++ = *str ^ 32;
+	}
+	else
+	    *buf++ = *str;
+	str++;
+	len--;
+    }
+    *buf = '\0';
+
+    return bufstart;
+}
+
 static PyObject *
-ZshEval(UNUSED(PyObject *self), PyObject *args)
+ZshEval(UNUSED(PyObject *self), PyObject *obj)
 {
     char *command;
 
-    if (!PyArg_ParseTuple(args, "s", &command))
+    if (!(command = get_chars(obj, PyMem_Malloc)))
 	return NULL;
 
     execstring(command, 1, 0, "zpython");
+
+    PyMem_Free(command);
 
     Py_RETURN_NONE;
 }
@@ -253,45 +342,13 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
     }
 }
 
-typedef void *(*Allocator) (size_t);
-
-static char *
-get_chars(PyObject *string, Allocator alloc)
-{
-    char *str, *buf, *bufstart;
-    Py_ssize_t len = 0;
-    Py_ssize_t i = 0;
-    Py_ssize_t buflen = 1;
-
-    if (PyString_AsStringAndSize(string, &str, &len) == -1)
-	return NULL;
-
-    while (i < len)
-	buflen += 1 + (imeta(str[i++]) ? 1 : 0);
-
-    buf = alloc(buflen * sizeof(char));
-    bufstart = buf;
-
-    while (len) {
-	if (imeta(*str)) {
-	    *buf++ = Meta;
-	    *buf++ = *str ^ 32;
-	}
-	else
-	    *buf++ = *str;
-	str++;
-	len--;
-    }
-    *buf = '\0';
-
-    return bufstart;
-}
-
 #define FAIL_SETTING_ARRAY \
 	while (val-- > valstart) \
 	    zsfree(*val); \
 	zfree(valstart, arrlen); \
 	return NULL
+
+#define IS_PY_STRING(s) (PyString_Check(s) || PyUnicode_Check(s))
 
 static char **
 get_chars_array(PyObject *seq, Allocator alloc)
@@ -313,12 +370,14 @@ get_chars_array(PyObject *seq, Allocator alloc)
     while (i < len) {
 	PyObject *item = PySequence_GetItem(seq, i);
 
-	if (!PyString_Check(item)) {
+	if (!IS_PY_STRING(item)) {
 	    PyErr_SetString(PyExc_TypeError, "Sequence item is not a string");
 	    FAIL_SETTING_ARRAY;
 	}
 
-	*val++ = get_chars(item, alloc);
+	if (!(*val++ = get_chars(item, alloc))) {
+	    FAIL_SETTING_ARRAY;
+	}
 	i++;
     }
     *val = NULL;
@@ -340,8 +399,11 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 	return NULL;
     }
 
-    if (PyString_Check(value)) {
-	char *s = get_chars(value, zalloc);
+    if (IS_PY_STRING(value)) {
+	char *s;
+
+	if (!(s = get_chars(value, zalloc)))
+	    return NULL;
 
 	if (!setsparam(name, s)) {
 	    PyErr_SetString(PyExc_RuntimeError,
@@ -350,6 +412,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 	    return NULL;
 	}
     }
+#if PY_MAJOR_VERSION < 3
     else if (PyInt_Check(value)) {
 	if (!setiparam(name, (zlong) PyInt_AsLong(value))) {
 	    PyErr_SetString(PyExc_RuntimeError,
@@ -357,6 +420,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 	    return NULL;
 	}
     }
+#endif
     else if (PyLong_Check(value)) {
 	if (!setiparam(name, (zlong) PyLong_AsLong(value))) {
 	    PyErr_SetString(PyExc_RuntimeError,
@@ -384,18 +448,23 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 	valstart = val;
 
 	while (PyDict_Next(value, &pos, &pkey, &pval)) {
-	    if (!PyString_Check(pkey)) {
+	    if (!IS_PY_STRING(pkey)) {
 		PyErr_SetString(PyExc_TypeError,
 			"Only string keys are allowed");
 		FAIL_SETTING_ARRAY;
 	    }
-	    if (!PyString_Check(pval)) {
+	    if (!IS_PY_STRING(pval)) {
 		PyErr_SetString(PyExc_TypeError,
 			"Only string values are allowed");
 		FAIL_SETTING_ARRAY;
 	    }
-	    *val++ = get_chars(pkey, zalloc);
-	    *val++ = get_chars(pval, zalloc);
+
+	    if (!(*val++ = get_chars(pkey, zalloc))) {
+		FAIL_SETTING_ARRAY;
+	    }
+	    if (!(*val++ = get_chars(pval, zalloc))) {
+		FAIL_SETTING_ARRAY;
+	    }
 	}
 	*val = NULL;
 
@@ -436,25 +505,25 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 static PyObject *
 ZshExitCode(UNUSED(PyObject *self), UNUSED(PyObject *args))
 {
-    return PyInt_FromLong((long) lastval);
+    return PyLong_FromLong((long) lastval);
 }
 
 static PyObject *
 ZshColumns(UNUSED(PyObject *self), UNUSED(PyObject *args))
 {
-    return PyInt_FromLong((long) zterm_columns);
+    return PyLong_FromLong((long) zterm_columns);
 }
 
 static PyObject *
 ZshLines(UNUSED(PyObject *self), UNUSED(PyObject *args))
 {
-    return PyInt_FromLong((long) zterm_lines);
+    return PyLong_FromLong((long) zterm_lines);
 }
 
 static PyObject *
 ZshSubshell(UNUSED(PyObject *self), UNUSED(PyObject *args))
 {
-    return PyInt_FromLong((long) zsh_subshell);
+    return PyLong_FromLong((long) zsh_subshell);
 }
 
 static PyObject *
@@ -465,7 +534,7 @@ ZshPipeStatus(UNUSED(PyObject *self), UNUSED(PyObject *args))
     PyObject *num;
 
     while (i < numpipestats) {
-	if (!(num = PyInt_FromLong(pipestats[i]))) {
+	if (!(num = PyLong_FromLong(pipestats[i]))) {
 	    Py_DECREF(r);
 	    return NULL;
 	}
@@ -506,14 +575,12 @@ unset_special_parameter(struct special_data *data)
 
 #define ZFAIL(errargs, failval) \
     PyErr_PrintEx(0); \
-    PyErr_Clear(); \
     PYTHON_FINISH; \
     zerr errargs; \
     return failval
 
 #define ZFAIL_NOFINISH(errargs, failval) \
     PyErr_PrintEx(0); \
-    PyErr_Clear(); \
     zerr errargs; \
     return failval
 
@@ -548,19 +615,21 @@ get_sh_item_value(PyObject *obj, PyObject *keyobj)
 	    return dupstring("");
     }
 
-    if (!(string = PyObject_Str(valobj))) {
+    if (IS_PY_STRING(valobj))
+	string = valobj;
+    else {
+	if (!(string = PyObject_Str(valobj))) {
+	    ZFAIL_NOFINISH(("Failed to get value string object"), dupstring(""));
+	}
 	Py_DECREF(valobj);
-	ZFAIL_NOFINISH(("Failed to get value string object"), dupstring(""));
     }
 
     if (!(str = get_chars(string, zhalloc))) {
-	Py_DECREF(valobj);
 	Py_DECREF(string);
 	ZFAIL_NOFINISH(("Failed to get string from value string object"),
 		dupstring(""));
     }
     Py_DECREF(string);
-    Py_DECREF(valobj);
     return str;
 }
 
@@ -647,7 +716,6 @@ static HashNode
 get_sh_item(HashTable ht, const char *key)
 {
     PyObject *obj = ((struct obj_hash_node *) (*ht->nodes))->obj;
-    char *str;
     Param pm;
     struct sh_key_data *sh_kdata;
 
@@ -674,7 +742,6 @@ scan_special_hash(HashTable ht, ScanFunc func, int flags)
 {
     PyObject *obj = ((struct obj_hash_node *) (*ht->nodes))->obj;
     PyObject *iter, *keyobj;
-    HashNode hn;
     struct param pm;
 
     memset((void *) &pm, 0, sizeof(struct param));
@@ -688,23 +755,20 @@ scan_special_hash(HashTable ht, ScanFunc func, int flags)
     }
 
     while ((keyobj = PyIter_Next(iter))) {
-	PyObject *string;
 	char *str;
 	struct sh_keyobj_data sh_kodata;
 
-	if (!(string = PyObject_Str(keyobj))) {
+	if (!IS_PY_STRING(keyobj)) {
 	    Py_DECREF(iter);
 	    Py_DECREF(keyobj);
-	    ZFAIL(("Failed to convert key to string object"), );
+	    ZFAIL(("Key is not a string"), );
 	}
 
-	if (!(str = get_chars(string, zhalloc))) {
-	    Py_DECREF(string);
+	if (!(str = get_chars(keyobj, zhalloc))) {
 	    Py_DECREF(iter);
 	    Py_DECREF(keyobj);
 	    ZFAIL(("Failed to get string from key string object"), );
 	}
-	Py_DECREF(string);
 	pm.node.nam = str;
 
 	sh_kodata.obj = obj;
@@ -753,12 +817,12 @@ get_special_integer(Param pm)
 
     PYTHON_INIT(0);
 
-    if (!(robj = PyNumber_Int(((struct special_data *) pm->u.data)->obj))) {
+    if (!(robj = PyNumber_Long(((struct special_data *) pm->u.data)->obj))) {
 	ZFAIL(("Failed to create int object for parameter %s", pm->node.nam),
 		0);
     }
 
-    r = PyInt_AsLong(robj);
+    r = PyLong_AsLong(robj);
 
     Py_DECREF(robj);
 
@@ -1193,13 +1257,19 @@ ZshSetMagicHash(UNUSED(PyObject *self), PyObject *args)
 }
 
 static struct PyMethodDef ZshMethods[] = {
-    {"eval", ZshEval, 1, "Evaluate command in current shell context",},
-    {"last_exit_code", ZshExitCode, 0, "Get last exit code. Returns an int"},
-    {"pipestatus", ZshPipeStatus, 0, "Get last pipe status. Returns a list of int"},
-    {"columns", ZshColumns, 0, "Get number of columns. Returns an int"},
-    {"lines", ZshLines, 0, "Get number of lines. Returns an int"},
-    {"subshell", ZshSubshell, 0, "Get subshell recursion depth. Returns an int"},
-    {"getvalue", ZshGetValue, 1,
+    {"eval", ZshEval, METH_O,
+	"Evaluate command in current shell context",},
+    {"last_exit_code", ZshExitCode, METH_NOARGS,
+	"Get last exit code. Returns an int"},
+    {"pipestatus", ZshPipeStatus, METH_NOARGS,
+	"Get last pipe status. Returns a list of int"},
+    {"columns", ZshColumns, METH_NOARGS,
+	"Get number of columns. Returns an int"},
+    {"lines", ZshLines, METH_NOARGS,
+	"Get number of lines. Returns an int"},
+    {"subshell", ZshSubshell, METH_NOARGS,
+	"Get subshell recursion depth. Returns an int"},
+    {"getvalue", ZshGetValue, METH_VARARGS,
 	"Get parameter value. Return types:\n"
 	"  str              for scalars\n"
 	"  long             for integer numbers\n"
@@ -1209,7 +1279,7 @@ static struct PyMethodDef ZshMethods[] = {
 	"Throws KeyError   if identifier is invalid,\n"
 	"       IndexError if parameter was not found\n"
     },
-    {"setvalue", ZshSetValue, 2,
+    {"setvalue", ZshSetValue, METH_VARARGS,
 	"Set parameter value. Use None to unset. Supported objects and corresponding\n"
 	"zsh parameter types:\n"
 	"  str               sets string scalars\n"
@@ -1222,28 +1292,28 @@ static struct PyMethodDef ZshMethods[] = {
 	"       RuntimeError if zsh set?param/unsetparam function failed,\n"
 	"       ValueError   if sequence item or dictionary key or value are not str\n"
 	"                       or sequence size is not known."},
-    {"set_special_string", ZshSetMagicString, 2,
+    {"set_special_string", ZshSetMagicString, METH_VARARGS,
 	"Define scalar (string) parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
 	"  Parameter with given name must not exist.\n"
 	"Second argument is value object. Its __str__ method will be used to get\n"
 	"  resulting string when parameter is accessed in zsh, __call__ method will be used\n"
 	"  to set value. If object is not callable then parameter will be considered readonly"},
-    {"set_special_integer", ZshSetMagicInteger, 2,
+    {"set_special_integer", ZshSetMagicInteger, METH_VARARGS,
 	"Define integer parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
 	"  Parameter with given name must not exist.\n"
 	"Second argument is value object. It will be coerced to long integer,\n"
 	"  __call__ method will be used to set value. If object is not callable\n"
 	"  then parameter will be considered readonly"},
-    {"set_special_float", ZshSetMagicFloat, 2,
+    {"set_special_float", ZshSetMagicFloat, METH_VARARGS,
 	"Define floating point parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
 	"  Parameter with given name must not exist.\n"
 	"Second argument is value object. It will be coerced to float,\n"
 	"  __call__ method will be used to set value. If object is not callable\n"
 	"  then parameter will be considered readonly"},
-    {"set_special_array", ZshSetMagicArray, 2,
+    {"set_special_array", ZshSetMagicArray, METH_VARARGS,
 	"Define array parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
 	"  Parameter with given name must not exist.\n"
@@ -1251,7 +1321,7 @@ static struct PyMethodDef ZshMethods[] = {
 	"  each item in sequence must have str type, __call__ method will be used\n"
 	"  to set value. If object is not callable then parameter will be\n"
 	"  considered readonly"},
-    {"set_special_hash", ZshSetMagicHash, 2,
+    {"set_special_hash", ZshSetMagicHash, METH_VARARGS,
 	"Define hash parameter.\n"
 	"First argument is parameter name, it must start with zpython (case is ignored).\n"
 	"  Parameter with given name must not exist.\n"
@@ -1311,20 +1381,33 @@ enables_(Module m, int **enables)
     return handlefeatures(m, &module_features, enables);
 }
 
+#if PY_MAJOR_VERSION >= 3
+static PyObject *
+PyInit_zsh()
+{
+    return PyModule_Create(&zshmodule);
+}
+#endif
+
 /**/
 int
 boot_(UNUSED(Module m))
 {
     zpython_subshell = zsh_subshell;
+#if PY_MAJOR_VERSION >= 3
+    if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
+	return 1;
     Py_Initialize();
     PyEval_InitThreads();
-#if PY_MAJOR_VERSION >= 3
-    PyModule_Create(&zshmodule);
 #else
-    Py_InitModule3("zsh", ZshMethods, (char *) NULL);
+    Py_Initialize();
+    PyEval_InitThreads();
+    if (!Py_InitModule3("zsh", ZshMethods, (char *) NULL))
+	return 1;
 #endif
-    globals = PyModule_GetDict(PyImport_AddModule("__main__"));
-    PYTHON_SAVE_THREAD;
+    if (!(globals = PyModule_GetDict(PyImport_AddModule("__main__"))))
+	return 1;
+    PyEval_SaveThread();
     return 0;
 }
 

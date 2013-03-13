@@ -6,6 +6,12 @@ The tt(zsh/zpython) module provides zpython builtin that runs python2 code
 from zsh command-line and zsh python module that is able to define special
 parameters.
 
+Note: by "string" it is meant either tt(str) or tt(unicode) object LPAR()python
+2 RPAR() or tt(bytes) object. Any strings received from zsh are converted to
+tt(str) LPAR()python 2 RPAR() or tt(bytes) LPAR()python 3 RPAR(): zsh strings
+can hold arbitrary data, not only valid unicode, thus tt(str) objects is the
+wrong choice on python 3.
+
 startitem()
 findex(zpython)
 item(tt(zpython) var(code))(
@@ -83,14 +89,10 @@ variable is considered to be read-only.
 pindex(zsh.set_special_hash)
 item(tt(zsh.set_special_array)LPAR()var(param), var(value)RPAR())(
 Bind object var(value) to parameter named var(param). Parameter must implement
-mapping protocol, be iterable by keys and each key and each value object must be
-coercible to string. Unlike other values this is the least restrictive function:
-you don't need exact str type for keys and values, you don't need exact dict
-type for the object itself, you don't even actually need iterable object: you
-will be restricted to use subscripts PLUS()= assignments and subscript
-assignments in this case. Unlike other special parameters sequence protocol is
-used to assign items or the whole array, so no need to implement __call__
-method. In case it is needed array is cleared by iterating over all keys and
-deleting them.
+mapping protocol, be iterable by keys, each key must be a string and each value
+object must be a string or coercible to it. Unlike other special parameters
+sequence protocol is used to assign items or the whole array, so no need to
+implement __call__ method. In case it is needed array is cleared by iterating
+over all keys and deleting them.
 )
 enditem()
