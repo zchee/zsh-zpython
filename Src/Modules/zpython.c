@@ -4,6 +4,7 @@
 
 #if PY_MAJOR_VERSION >= 3
 # define PyString_Check             PyBytes_Check
+# define PyString_FromString        PyBytes_FromString
 # define PyString_FromStringAndSize PyBytes_FromStringAndSize
 # define PyString_AsStringAndSize   PyBytes_AsStringAndSize
 #endif
@@ -1334,6 +1335,350 @@ static struct PyMethodDef ZshMethods[] = {
     {NULL, NULL, 0, NULL},
 };
 
+static PyTypeObject EnvironGeneratorType;
+
+typedef PyObject *(*SingleEnvItemGenerator) (char *);
+
+typedef struct {
+    PyObject_HEAD
+    char **environ;
+    SingleEnvItemGenerator getobject;
+} EnvironGeneratorObject;
+
+static PyObject *
+EnvironGeneratorNext(PyObject *self)
+{
+    EnvironGeneratorObject *this = (EnvironGeneratorObject *) self;
+
+    if (*this->environ == NULL)
+	return NULL;
+
+    return this->getobject(*(this->environ++));
+}
+
+static PyObject *
+EnvironGeneratorIter(PyObject *self)
+{
+    Py_INCREF(self);
+    return self;
+}
+
+static PyObject *
+EnvironGeneratorNew(SingleEnvItemGenerator getobject)
+{
+    EnvironGeneratorObject *self = PyObject_NEW(EnvironGeneratorObject, &EnvironGeneratorType);
+    self->environ = environ;
+    self->getobject = getobject;
+    return (PyObject *) self;
+}
+
+static PyObject *
+EnvironGetKey(char *eitem)
+{
+    char *p = strchr(eitem, '=');
+    if (p == NULL) {
+	PyErr_SetString(PyExc_SystemError, "No = in environ");
+	return NULL;
+    }
+    return PyString_FromStringAndSize(eitem, (Py_ssize_t) (p - eitem));
+}
+
+static PyObject *
+EnvironGetValue(char *eitem)
+{
+    char *p = strchr(eitem, '=');
+    if (p == NULL) {
+	PyErr_SetString(PyExc_SystemError, "No = in environ");
+	return NULL;
+    }
+    return PyString_FromString(p + 1);
+}
+
+static PyObject *
+EnvironGetItem(char *eitem)
+{
+    char *p = strchr(eitem, '=');
+    if (p == NULL) {
+	PyErr_SetString(PyExc_SystemError, "No = in environ");
+	return NULL;
+    }
+    return Py_BuildValue(
+#if PY_MAJOR_VERSION < 3
+	    "s#s",
+#else
+	    "y#y",
+#endif
+	    eitem, (int) (p - eitem), p + 1);
+}
+
+static PyTypeObject EnvironType;
+
+static PyObject *
+EnvironKeys(UNUSED(PyObject *self))
+{
+    return EnvironGeneratorNew(EnvironGetKey);
+}
+
+static PyObject *
+EnvironValues(UNUSED(PyObject *self))
+{
+    return EnvironGeneratorNew(EnvironGetValue);
+}
+
+static PyObject *
+EnvironItems(UNUSED(PyObject *self))
+{
+    return EnvironGeneratorNew(EnvironGetItem);
+}
+
+static PyObject *
+EnvironCopy(UNUSED(PyObject *self))
+{
+    char **e;
+    PyObject *d = PyDict_New();
+
+    for (e = environ; *e != NULL; e++) {
+	PyObject *k;
+	PyObject *v;
+	char *p = strchr(*e, '=');
+	if (p == NULL) {
+	    PyErr_SetString(PyExc_SystemError, "No = in environ");
+	    Py_DECREF(d);
+	    return NULL;
+	}
+	if (!(k = PyString_FromStringAndSize(*e, (Py_ssize_t) (p - *e)))) {
+	    Py_DECREF(d);
+	    return NULL;
+	}
+	if (!(v = PyString_FromString(p + 1))) {
+	    Py_DECREF(k);
+	    Py_DECREF(d);
+	    return NULL;
+	}
+	if (PyDict_SetItem(d, k, v) != 0) {
+	    Py_DECREF(k);
+	    Py_DECREF(v);
+	    Py_DECREF(d);
+	    return NULL;
+	}
+    }
+
+    return d;
+}
+
+static PyObject *
+EnvironPop(UNUSED(PyObject *self), PyObject *args)
+{
+    char *var;
+    char *val;
+    Param pm;
+    PyObject *def = NULL;
+
+    if (!PyArg_ParseTuple(args, "s|O", &var, &def))
+	return NULL;
+
+    if (!(val = zgetenv(var))) {
+	if (def) {
+	    Py_INCREF(def);
+	    return def;
+	}
+	else {
+	    PyErr_SetNone(PyExc_KeyError);
+	    return NULL;
+	}
+    }
+
+    unsetparam(var);
+    if (errflag) {
+	PyErr_SetString(PyExc_RuntimeError, "Failed to delete parameter");
+	return NULL;
+    }
+
+    return PyString_FromString(val);
+}
+
+static PyObject *
+EnvironPopItem(PyObject *self, PyObject *args)
+{
+    PyObject *r;
+    char *var;
+
+    if (!PyArg_ParseTuple(args, "s", &var))
+	return NULL;
+
+    if (!(r = EnvironPop(self, args)))
+	return NULL;
+
+    return Py_BuildValue("sO", var, r);
+}
+
+static PyObject *
+EnvironGet(UNUSED(PyObject *self), PyObject *args)
+{
+    char *var;
+    char *val;
+    Param pm;
+    PyObject *def = NULL;
+
+    if (!PyArg_ParseTuple(args, "s|O", &var, &def))
+	return NULL;
+
+    if (!(val = zgetenv(var))) {
+	if (def) {
+	    Py_INCREF(def);
+	    return def;
+	}
+	else {
+	    Py_RETURN_NONE;
+	}
+    }
+
+    return PyString_FromString(val);
+}
+
+static char *
+get_no_null_chars(PyObject *string)
+{
+    char *str;
+
+    if (PyString_Check(string)) {
+	if (PyString_AsStringAndSize(string, &str, NULL) == -1)
+	    return NULL;
+    }
+    else {
+#if defined(PY_VERSION_HEX) && PY_VERSION_HEX >= 0x03030000
+	if (!(str = PyUnicode_AsUTF8AndSize(string, NULL)))
+	    return NULL;
+#else
+	PyObject *bytes;
+	if (!(bytes = PyUnicode_AsUTF8String(string)))
+	    return NULL;
+
+	if (PyString_AsStringAndSize(bytes, &str, NULL) == -1) {
+	    Py_DECREF(bytes);
+	    return NULL;
+	}
+	Py_DECREF(bytes);
+#endif
+    }
+
+    return str;
+}
+
+static PyMethodDef EnvironMethods[] = {
+    {"keys", (PyCFunction) EnvironKeys, METH_NOARGS,
+	"Generator of environment variable names, in order they are present in **environ"},
+    {"values", (PyCFunction) EnvironValues, METH_NOARGS,
+	"Generator of environment variable values, in order they are present in **environ"},
+    {"items", (PyCFunction) EnvironItems, METH_NOARGS,
+	"Generator of environment variable (name, value) tuples, in order they are present in **environ"},
+    {"copy", (PyCFunction) EnvironCopy, METH_NOARGS,
+	"Returns a dictionary with the snapshot of current exported environment"},
+    {"pop", EnvironPop, METH_VARARGS,
+	"Removes and returns exported variable, raising KeyError if it is not available.\n"
+	"If second argument is given returns it instead of raising KeyError."},
+    {"popitem", EnvironPopItem, METH_VARARGS,
+	"Removes exported variable and returns tuple (varname, value), raising KeyError if it is not available"},
+    {"get", EnvironGet, METH_VARARGS,
+	"Return environment variable value or second argument (defaults to None) if it is not found"},
+};
+
+static PyObject *
+EnvironItem(UNUSED(PyObject *self), PyObject *keyObject)
+{
+    char *var;
+    char *val;
+
+    if (!(var = get_no_null_chars(keyObject)))
+	return NULL;
+
+    if (!(val = zgetenv(var))) {
+	PyErr_SetNone(PyExc_KeyError);
+	return NULL;
+    }
+
+    return PyString_FromString(val);
+}
+
+static PyObject *
+EnvironAssItem(PyObject *self, PyObject *keyObject, PyObject *valObject)
+{
+    if (valObject == NULL) {
+	PyObject *args;
+	PyObject *item;
+
+	if (!(args = PyTuple_Pack(1, keyObject)))
+	    return NULL;
+	if (!(item = EnvironPop(self, args))) {
+	    Py_DECREF(args);
+	    return NULL;
+	}
+	Py_DECREF(args);
+	Py_DECREF(item);
+	Py_RETURN_NONE;
+    }
+    else {
+	char *var;
+	char *val;
+	if (!(var = get_no_null_chars(keyObject)))
+	    return NULL;
+
+	if (!(val = get_no_null_chars(valObject)))
+	    return NULL;
+
+	assignsparam(var, val, PM_EXPORTED);
+	Py_RETURN_NONE;
+    }
+}
+
+static Py_ssize_t
+EnvironLength(UNUSED(PyObject *self))
+{
+    char **e;
+    Py_ssize_t r = 0;
+
+    for(e = environ; *e != NULL; e++)
+	r++;
+
+    return r;
+}
+
+static PyMappingMethods EnvironAsMapping = {
+    (lenfunc) EnvironLength,
+    (binaryfunc) EnvironItem,
+    (objobjargproc) EnvironAssItem,
+};
+
+typedef struct {
+    PyObject_HEAD
+} EnvironObject;
+
+static int
+init_types(void)
+{
+    memset(&EnvironGeneratorType, 0, sizeof(EnvironGeneratorType));
+    EnvironGeneratorType.tp_name = "zsh.environ_generator";
+    EnvironGeneratorType.tp_basicsize = sizeof(EnvironGeneratorObject);
+    EnvironGeneratorType.tp_getattro = PyObject_GenericGetAttr;
+    EnvironGeneratorType.tp_iter = EnvironGeneratorIter;
+    EnvironGeneratorType.tp_iternext = EnvironGeneratorNext;
+    EnvironGeneratorType.tp_flags = Py_TPFLAGS_DEFAULT;
+
+    memset(&EnvironType, 0, sizeof(EnvironType));
+    EnvironType.tp_name = "zsh.environ";
+    EnvironType.tp_basicsize = sizeof(EnvironObject);
+    EnvironType.tp_getattro = PyObject_GenericGetAttr;
+    EnvironType.tp_methods = EnvironMethods;
+    EnvironType.tp_as_mapping = &EnvironAsMapping;
+    EnvironType.tp_flags = Py_TPFLAGS_DEFAULT;
+
+    if (PyType_Ready(&EnvironGeneratorType) == -1)
+	return 1;
+    if (PyType_Ready(&EnvironType) == -1)
+	return 1;
+    return 0;
+}
+
 #if PY_MAJOR_VERSION >= 3
 static struct PyModuleDef zshmodule = {
     PyModuleDef_HEAD_INIT,
@@ -1382,11 +1727,35 @@ enables_(Module m, int **enables)
     return handlefeatures(m, &module_features, enables);
 }
 
+static int
+zsh_init_globals(PyObject *zsh_globals)
+{
+    EnvironObject *environ;
+
+    if (init_types())
+	return 1;
+
+    if (!(environ = PyObject_NEW(EnvironObject, &EnvironType)))
+	return 1;
+
+    if (PyDict_SetItemString(zsh_globals, "environ", (PyObject *)environ) == -1)
+	return 1;
+    return 0;
+}
+
 #if PY_MAJOR_VERSION >= 3
 static PyObject *
 PyInit_zsh()
 {
-    return PyModule_Create(&zshmodule);
+    PyObject *module_globals;
+    PyObject *module = PyModule_Create(&zshmodule);
+
+    if (!(module_globals = PyModule_GetDict(module)))
+	return NULL;
+    if (zsh_init_globals(module_globals))
+	return NULL;
+
+    return module;
 }
 #endif
 
@@ -1394,6 +1763,8 @@ PyInit_zsh()
 int
 boot_(UNUSED(Module m))
 {
+    PyObject *module;
+    PyObject *module_globals;
     zpython_subshell = zsh_subshell;
 #if PY_MAJOR_VERSION >= 3
     if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
@@ -1403,7 +1774,11 @@ boot_(UNUSED(Module m))
 #else
     Py_Initialize();
     PyEval_InitThreads();
-    if (!Py_InitModule3("zsh", ZshMethods, (char *) NULL))
+    if (!(module = Py_InitModule3("zsh", ZshMethods, (char *) NULL)))
+	return 1;
+    if (!(module_globals = PyModule_GetDict(module)))
+	return 1;
+    if (zsh_init_globals(module_globals))
 	return 1;
 #endif
     if (!(globals = PyModule_GetDict(PyImport_AddModule("__main__"))))
@@ -1454,6 +1829,7 @@ cleanup_(Module m)
 	}
 	PYTHON_RESTORE_THREAD;
 	Py_Finalize();
+	PYTHON_SAVE_THREAD;
     }
     return setfeatureenables(m, &module_features, NULL);
 }
