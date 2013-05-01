@@ -1581,6 +1581,7 @@ static PyMethodDef EnvironMethods[] = {
 	"Removes exported variable and returns tuple (varname, value), raising KeyError if it is not available"},
     {"get", EnvironGet, METH_VARARGS,
 	"Return environment variable value or second argument (defaults to None) if it is not found"},
+    {NULL, NULL, 0, NULL},
 };
 
 static PyObject *
