@@ -1766,14 +1766,17 @@ boot_(UNUSED(Module m))
     PyObject *module;
     PyObject *module_globals;
     zpython_subshell = zsh_subshell;
+    char *(argv[2]) = {argzero, NULL};
 #if PY_MAJOR_VERSION >= 3
     if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
 	return 1;
     Py_Initialize();
     PyEval_InitThreads();
+    PySys_SetArgvEx(1, argv, 0);
 #else
     Py_Initialize();
     PyEval_InitThreads();
+    PySys_SetArgvEx(1, argv, 0);
     if (!(module = Py_InitModule3("zsh", ZshMethods, (char *) NULL)))
 	return 1;
     if (!(module_globals = PyModule_GetDict(module)))
