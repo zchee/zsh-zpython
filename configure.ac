@@ -2638,6 +2638,9 @@ AC_HELP_STRING([--with-python-config-dir=FILE], [Python config directory]),
 AC_ARG_WITH(python-executable,
 AC_HELP_STRING([--with-python-executable=FILE], [Path to python executable]),
 [zsh_cv_path_python="$withval"])dnl
+AC_ARG_WITH(python-version,
+AC_HELP_STRING([--with-python-version=FILE], [Python version (use MAJ.MINd for debugging versions)]),
+[zsh_cv_python_version="$withval"])dnl
 if test x$zpython = xyes; then
     dnl Copied from vim's src/configure.in
     if test x$zsh_cv_path_python == x; then
@@ -2649,12 +2652,10 @@ if test x$zpython = xyes; then
     [zsh_cv_path_python_pfx=`${zsh_cv_path_python} -c 'import sys; print(sys.prefix)'`])
     AC_CACHE_CHECK(Python execution prefix, zsh_cv_path_python_epfx,
     [zsh_cv_path_python_epfx=`${zsh_cv_path_python} -c 'import sys; print(sys.exec_prefix)'`])
-    AC_CACHE_VAL(zsh_cv_path_pythonpath,
-    [zsh_cv_path_pythonpath=`unset PYTHONPATH;${zsh_cv_path_python} -c 'import sys; print(":".join(sys.path))'`])
     AC_CACHE_CHECK(Python configuration directory, zsh_cv_path_python_conf,
     [zsh_cv_path_python_conf=
      for path in "${zsh_cv_path_python_pfx}" "${zsh_cv_path_python_epfx}" ; do
-         for subdir in lib64 lib share ; do
+         for subdir in lib lib64 share ; do
              d="${path}/${subdir}/python${zsh_cv_python_version}/config"
              for dir in "${d}" "${d}-${zsh_cv_python_version}" ; do
                  if test -d "${dir}" && test -f "${dir}/config.c"; then
