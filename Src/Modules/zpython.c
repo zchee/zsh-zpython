@@ -1258,7 +1258,7 @@ ZshSetMagicHash(UNUSED(PyObject *self), PyObject *args)
     return set_special_parameter(args, PM_HASHED);
 }
 
-static struct PyMethodDef ZshMethods[] = {
+static const struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, METH_O,
 	"Evaluate command in current shell context",},
     {"last_exit_code", ZshExitCode, METH_NOARGS,
@@ -1744,13 +1744,19 @@ zsh_init_globals(PyObject *zsh_globals)
     return 0;
 }
 
-#if PY_MAJOR_VERSION >= 3
 static PyObject *
 PyInit_zsh()
 {
     PyObject *module_globals;
-    PyObject *module = PyModule_Create(&zshmodule);
+    PyObject *module;
 
+#if PY_MAJOR_VERSION >= 3
+    if (!(module = PyModule_Create(&zshmodule)))
+	return NULL;
+#else
+    if (!(module = Py_InitModule("zsh", (PyMethodDef *) ZshMethods)))
+	return NULL;
+#endif
     if (!(module_globals = PyModule_GetDict(module)))
 	return NULL;
     if (zsh_init_globals(module_globals))
@@ -1758,36 +1764,21 @@ PyInit_zsh()
 
     return module;
 }
-#endif
 
 /**/
 int
 boot_(UNUSED(Module m))
 {
-    PyObject *module;
-    PyObject *module_globals;
     zpython_subshell = zsh_subshell;
     char *(argv[2]) = {argzero, NULL};
-#if PY_MAJOR_VERSION >= 3
     if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
 	return 1;
     Py_Initialize();
-    PyEval_InitThreads();
+    PYTHON_INIT(1);
     PySys_SetArgvEx(1, argv, 0);
-#else
-    Py_Initialize();
-    PyEval_InitThreads();
-    PySys_SetArgvEx(1, argv, 0);
-    if (!(module = Py_InitModule3("zsh", ZshMethods, (char *) NULL)))
-	return 1;
-    if (!(module_globals = PyModule_GetDict(module)))
-	return 1;
-    if (zsh_init_globals(module_globals))
-	return 1;
-#endif
     if (!(globals = PyModule_GetDict(PyImport_AddModule("__main__"))))
 	return 1;
-    PyEval_SaveThread();
+    PYTHON_FINISH;
     return 0;
 }
 
@@ -1833,6 +1824,7 @@ cleanup_(Module m)
 	}
 	PYTHON_RESTORE_THREAD;
 	Py_Finalize();
+	pygilstate = PyGILState_UNLOCKED;
     }
     return setfeatureenables(m, &module_features, NULL);
 }
