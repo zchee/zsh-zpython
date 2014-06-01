@@ -122,6 +122,7 @@ do_zpython(char *nam, char **args, Options ops, int func)
 }
 
 typedef void *(*Allocator) (size_t);
+typedef void (*DeAllocator) (void *, int);
 
 static char *
 get_chars(PyObject *string, Allocator alloc)
@@ -343,16 +344,18 @@ ZshGetValue(UNUSED(PyObject *self), PyObject *args)
     }
 }
 
-#define FAIL_SETTING_ARRAY \
-	while (val-- > valstart) \
-	    zsfree(*val); \
-	zfree(valstart, arrlen); \
+#define FAIL_SETTING_ARRAY(val, arrlen, dealloc) \
+	if (dealloc != NULL) { \
+	    while (val-- > valstart) \
+		dealloc(*val, strlen(*val)); \
+	    dealloc(valstart, arrlen); \
+	} \
 	return NULL
 
 #define IS_PY_STRING(s) (PyString_Check(s) || PyUnicode_Check(s))
 
 static char **
-get_chars_array(PyObject *seq, Allocator alloc)
+get_chars_array(PyObject *seq, Allocator alloc, DeAllocator dealloc)
 {
     char **val, **valstart;
     Py_ssize_t len = PySequence_Size(seq);
@@ -373,11 +376,11 @@ get_chars_array(PyObject *seq, Allocator alloc)
 
 	if (!IS_PY_STRING(item)) {
 	    PyErr_SetString(PyExc_TypeError, "Sequence item is not a string");
-	    FAIL_SETTING_ARRAY;
+	    FAIL_SETTING_ARRAY(val, arrlen, dealloc);
 	}
 
 	if (!(*val++ = get_chars(item, alloc))) {
-	    FAIL_SETTING_ARRAY;
+	    FAIL_SETTING_ARRAY(val, arrlen, dealloc);
 	}
 	i++;
     }
@@ -452,19 +455,19 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 	    if (!IS_PY_STRING(pkey)) {
 		PyErr_SetString(PyExc_TypeError,
 			"Only string keys are allowed");
-		FAIL_SETTING_ARRAY;
+		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 	    if (!IS_PY_STRING(pval)) {
 		PyErr_SetString(PyExc_TypeError,
 			"Only string values are allowed");
-		FAIL_SETTING_ARRAY;
+		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 
 	    if (!(*val++ = get_chars(pkey, zalloc))) {
-		FAIL_SETTING_ARRAY;
+		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 	    if (!(*val++ = get_chars(pval, zalloc))) {
-		FAIL_SETTING_ARRAY;
+		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 	}
 	*val = NULL;
@@ -477,7 +480,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     /* Python's list have no faster shortcut methods like PyDict_Next above
      * thus using more abstract protocol */
     else if (PySequence_Check(value)) {
-	char **ss = get_chars_array(value, zalloc);
+	char **ss = get_chars_array(value, zalloc, zfree);
 
 	if (!ss)
 	    return NULL;
@@ -863,7 +866,7 @@ get_special_array(Param pm)
     PYTHON_INIT(hcalloc(sizeof(char **)));
 
     if (!(r = get_chars_array(((struct special_data *) pm->u.data)->obj,
-		    zhalloc))) {
+		    zhalloc, NULL))) {
 	ZFAIL(("Failed to create array object for parameter %s", pm->node.nam),
 		hcalloc(sizeof(char **)));
     }
