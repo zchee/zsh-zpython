@@ -190,13 +190,7 @@
   zpython 'zsh.set_special_hash("zpython_hsh", EHash())'
   zpython 'zsh.getvalue("NOT AN IDENTIFIER")'
   zpython 'zsh.getvalue("XXX_UNKNOWN_PARAMETER")'
-  zpython 'zsh.setvalue("NOT AN IDENTIFIER", "")'
-  zpython 'zsh.setvalue("NOT_A_STRING_ITEM", [1])'
-  zpython 'zsh.setvalue("UNKNOWN_SIZE", EArray())'
-  zpython 'zsh.setvalue("NOT_A_STRING_KEY", {1 : "abc"})'
-  zpython 'zsh.setvalue("NOT_A_STRING_VALUE", {"abc" : 1})'
-  zpython 'zsh.setvalue("UNKNOWN_TYPE", str)'
-1:Various errors: getvalue and setvalue
+1:Various errors: getvalue
 # NOT AN IDENTIFIER
 *?Traceback*
 ?*
@@ -205,27 +199,39 @@
 ?Traceback*
 ?*
 ?IndexError:*
+
+  zpython 'zsh.setvalue("NOT AN IDENTIFIER", "")'
+  zpython 'zsh.setvalue("UNKNOWN_TYPE", str)'
+1:Various errors: setvalue
 # NOT AN IDENTIFIER
-?Traceback*
+*?Traceback*
 ?*
 ?KeyError:*
-# NOT_A_STRING_ITEM
+# UNKNOWN_TYPE
 ?Traceback*
+?*
+?TypeError:*
+
+  zpython 'zsh.setvalue("NOT_A_STRING_ITEM", [1])'
+  zpython 'zsh.setvalue("UNKNOWN_SIZE", EArray())'
+1:Various errors: setvalue (arrays)
+# NOT_A_STRING_ITEM
+*?Traceback*
 ?*
 ?TypeError:*
 # UNKNOWN_SIZE
 ?Traceback*
 ?*
 ?ValueError:*
+
+  zpython 'zsh.setvalue("NOT_A_STRING_KEY", {1 : "abc"})'
+  zpython 'zsh.setvalue("NOT_A_STRING_VALUE", {"abc" : 1})'
+1:Various errors: setvalue (hashes)
 # NOT_A_STRING_KEY
-?Traceback*
+*?Traceback*
 ?*
 ?TypeError:*
 # NOT_A_STRING_VALUE
-?Traceback*
-?*
-?TypeError:*
-# UNKNOWN_TYPE
 ?Traceback*
 ?*
 ?TypeError:*
@@ -396,11 +402,11 @@
 ?KeyError
 ?*:1:*create float object*
 # zpython_str=""
-?*:1:*assign value for string*
 ?Traceback*
 ?*
 ?*
 ?KeyError
+?*:1:*assign value for string*
 # zpython_int=2
 ?(Traceback*|*:1:*assign value for integer*)
 ?(*|Traceback*)
