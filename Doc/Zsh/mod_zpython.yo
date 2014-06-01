@@ -95,4 +95,28 @@ sequence protocol is used to assign items or the whole array, so no need to
 implement __call__ method. In case it is needed array is cleared by iterating
 over all keys and deleting them.
 )
+pindex(zsh.environ)
+item(tt(zsh.environ))(
+Object that provides access to exported variables. Is an incomplete drop-in
+replacement for var(os.environ) supporting the following methods:
+
+item(tt(keys)LPAR()RPAR())(
+Iterator listing variable names.)
+item(tt(values)LPAR()RPAR())(
+Iterator listing variable values.)
+item(tt(items)LPAR()RPAR())(
+Iterator listing LPAR()var(key), var(value)RPAR() pairs.)
+item(tt(copy)LPAR()RPAR())(
+Returns a Python dictionary with all variables. Equivalent to
+tt(dict)tt(LPAR()zsh.environ.items LPAR()RPAR()RPAR()).)
+item(tt(pop)LPAR()var(key)[, var(default)]RPAR())(
+Remove and return given variable. If variable is not present then function
+returns its second argument. If it is not given as well then raises
+tt(KeyError).)
+item(tt(popitem)LPAR()RPAR())(
+Remove one of the variables and returns tuple LPAR()var(name), var(value)RPAR().
+Raises KeyError if there are no variables.)
+item(tt(get)LPAR()var(key)[, var(default)=None]RPAR())(
+Return environment variable value or second argument if it is not found.)
+)
 enditem()
