@@ -1833,7 +1833,6 @@ cleanup_(Module m)
 	}
 	PYTHON_RESTORE_THREAD;
 	Py_Finalize();
-	PYTHON_SAVE_THREAD;
     }
     return setfeatureenables(m, &module_features, NULL);
 }
