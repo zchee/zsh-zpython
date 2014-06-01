@@ -1770,21 +1770,28 @@ int
 boot_(UNUSED(Module m))
 {
 #if PY_MAJOR_VERSION >= 3
-    size_t zsh_name_size = strlen(zsh_name);
+    size_t zsh_name_size = strlen(argzero);
     wchar_t *zsh_name_wchar;
+    wchar_t *argv[2];
+    wchar_t *program_name;
     if ((zsh_name_wchar = zhalloc(zsh_name_size + 1)) == NULL)
 	return 1;
-    mbstowcs(zsh_name_wchar, zsh_name, zsh_name_size);
+    mbstowcs(zsh_name_wchar, argzero, zsh_name_size);
     zsh_name_wchar[zsh_name_size] = '\0';
-    Py_SetProgramName(zsh_name_wchar);
+    program_name = zsh_name_wchar;
 #else
-    Py_SetProgramName(zsh_name);
+    char *argv[2];
+    char *program_name = argzero;
 #endif
+    argv[0] = program_name;
+    argv[1] = NULL;
+    Py_SetProgramName(program_name);
     zpython_subshell = zsh_subshell;
     if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
 	return 1;
     Py_InitializeEx(0);
     PYTHON_INIT(1);
+    PySys_SetArgvEx(1, argv, 0);
     if (!(globals = PyModule_GetDict(PyImport_AddModule("__main__"))))
 	return 1;
     PYTHON_FINISH;
