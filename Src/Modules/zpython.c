@@ -1258,7 +1258,7 @@ ZshSetMagicHash(UNUSED(PyObject *self), PyObject *args)
     return set_special_parameter(args, PM_HASHED);
 }
 
-static const struct PyMethodDef ZshMethods[] = {
+static struct PyMethodDef ZshMethods[] = {
     {"eval", ZshEval, METH_O,
 	"Evaluate command in current shell context",},
     {"last_exit_code", ZshExitCode, METH_NOARGS,
@@ -1754,7 +1754,7 @@ PyInit_zsh()
     if (!(module = PyModule_Create(&zshmodule)))
 	return NULL;
 #else
-    if (!(module = Py_InitModule("zsh", (PyMethodDef *) ZshMethods)))
+    if (!(module = Py_InitModule("zsh", ZshMethods)))
 	return NULL;
 #endif
     if (!(module_globals = PyModule_GetDict(module)))
