@@ -66,7 +66,9 @@ class Hash(object):
             self.acc.append([a, 1])
 
     def __init__(self):
+        from collections import OrderedDict
         self.d = {'a': 'b'} if sys.version_info < (3,) else {b'a': b'b'}
+        self.d = OrderedDict(self.d)
         self.acc = []
 
     def keys(self):

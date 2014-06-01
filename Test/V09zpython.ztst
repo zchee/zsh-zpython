@@ -155,10 +155,10 @@
   echo $ZPYTHON_HASH[a]
   echo $ZPYTHON_HASH[b]
   echo ${ZPYTHON_HASH}
-  ZPYTHON_HASH=(def abc)
+  ZPYTHON_HASH=(abc def)
   echo ${(kv)ZPYTHON_HASH}
-  ZPYTHON_HASH+=(abc def)
-  echo ${(kv)ZPYTHON_HASH}
+  ZPYTHON_HASH+=(ghi jkl)
+  echo ${(kvo)ZPYTHON_HASH}
 0:set_special_hash: dictionary
 >a b
 >a
@@ -166,8 +166,8 @@
 >b
 >
 >b
->def abc
->abc def def abc
+>abc def
+>abc def ghi jkl
 
   zpython 'zsh.set_special_hash("ZPYTHON_HASH2", Hash())'
   echo $ZPYTHON_HASH2
@@ -402,11 +402,11 @@
 ?KeyError
 ?*:1:*create float object*
 # zpython_str=""
-?Traceback*
+?(Traceback*|*:1:*assign value for string*)
+?(*|Traceback*)
 ?*
-?*
-?KeyError
-?*:1:*assign value for string*
+?(KeyError|*)
+?(*:1:*assign value for string*|KeyError)
 # zpython_int=2
 ?(Traceback*|*:1:*assign value for integer*)
 ?(*|Traceback*)
