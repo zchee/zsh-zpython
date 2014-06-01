@@ -1769,13 +1769,22 @@ PyInit_zsh()
 int
 boot_(UNUSED(Module m))
 {
+#if PY_MAJOR_VERSION >= 3
+    size_t zsh_name_size = strlen(zsh_name);
+    wchar_t *zsh_name_wchar;
+    if ((zsh_name_wchar = zhalloc(zsh_name_size + 1)) == NULL)
+	return 1;
+    mbstowcs(zsh_name_wchar, zsh_name, zsh_name_size);
+    zsh_name_wchar[zsh_name_size] = '\0';
+    Py_SetProgramName(zsh_name_wchar);
+#else
+    Py_SetProgramName(zsh_name);
+#endif
     zpython_subshell = zsh_subshell;
-    char *(argv[2]) = {argzero, NULL};
     if (PyImport_AppendInittab("zsh", PyInit_zsh) == -1)
 	return 1;
-    Py_Initialize();
+    Py_InitializeEx(0);
     PYTHON_INIT(1);
-    PySys_SetArgvEx(1, argv, 0);
     if (!(globals = PyModule_GetDict(PyImport_AddModule("__main__"))))
 	return 1;
     PYTHON_FINISH;
