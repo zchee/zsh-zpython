@@ -1,4 +1,4 @@
-COMMENT(!MOD!zsh/parameter
+COMMENT(!MOD!zsh/zpython
 Python bindings for zsh
 !MOD!)
 cindex(zpython, special)
