@@ -1277,7 +1277,12 @@ static struct PyMethodDef ZshMethods[] = {
     {"getvalue", ZshGetValue, METH_VARARGS,
 	"Get parameter value. Return types:\n"
 	"  str              for scalars\n"
-	"  long             for integer numbers\n"
+#if PY_MAJOR_VERSION < 3
+	"  long             "
+#else
+	"  int              "
+#endif
+	                   "for integer numbers\n"
 	"  float            for floating-point numbers\n"
 	"  list [str]       for array parameters\n"
 	"  dict {str : str} for associative arrays\n"
@@ -1288,7 +1293,12 @@ static struct PyMethodDef ZshMethods[] = {
 	"Set parameter value. Use None to unset. Supported objects and corresponding\n"
 	"zsh parameter types:\n"
 	"  str               sets string scalars\n"
-	"  long or int       sets integer numbers\n"
+#if PY_MAJOR_VERSION < 3
+	"  long or int       "
+#else
+	"  int               "
+#endif
+	                    "sets integer numbers\n"
 	"  float             sets floating-point numbers. Output is in scientific notation\n"
 	"  sequence of str   sets array parameters (sequence = anything implementing\n"
 	"                    sequence protocol)\n"
