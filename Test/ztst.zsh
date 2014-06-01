@@ -339,6 +339,7 @@ ZTST_diff() {
     else
       for (( i = 1; i <= ${#diff_lines1}; i++ )); do
 	if [[ ${diff_lines2[i]} != ${~diff_lines1[i]} ]]; then
+	  print -rl "Line \"${diff_lines2[i]}\" ($i) does not match \"${diff_lines1[i]}\""
 	  failed=1
 	  print -r "Pattern match failed, line $i:"
 	  break
