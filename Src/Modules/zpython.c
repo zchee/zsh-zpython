@@ -45,7 +45,7 @@ after_fork()
 {
     zpython_subshell = zsh_subshell;
     hashdict = NULL;
-    PyOS_AfterFork();
+    PyOS_AfterFork_Child();
 }
 
 #define PYTHON_INIT(failval) \
@@ -124,7 +124,7 @@ do_zpython(char *nam, char **args, Options ops, int func)
 typedef void *(*Allocator) (size_t);
 typedef void (*DeAllocator) (void *, int);
 
-static char *
+static const char *
 get_chars(PyObject *string, Allocator alloc)
 {
     char *str, *buf, *bufstart;
@@ -133,12 +133,12 @@ get_chars(PyObject *string, Allocator alloc)
     Py_ssize_t buflen = 1;
 
     if (PyString_Check(string)) {
-	if (PyString_AsStringAndSize(string, &str, &len) == -1)
+	if (PyString_AsStringAndSize(string, (char **)&str, &len) == -1)
 	    return NULL;
     }
     else {
 #if defined(PY_VERSION_HEX) && PY_VERSION_HEX >= 0x03030000
-	if (!(str = PyUnicode_AsUTF8AndSize(string, &len)))
+	if (!(str = (char *)PyUnicode_AsUTF8AndSize(string, &len)))
 	    return NULL;
 #else
 	PyObject *bytes;
@@ -179,12 +179,12 @@ ZshEval(UNUSED(PyObject *self), PyObject *obj)
 {
     char *command;
 
-    if (!(command = get_chars(obj, PyMem_Malloc)))
+    if (!(command = (char *)get_chars(obj, PyMem_Malloc)))
 	return NULL;
 
-    execstring(command, 1, 0, "zpython");
+    execstring((char *)command, 1, 0, "zpython");
 
-    PyMem_Free(command);
+    PyMem_Free((char *)command);
 
     Py_RETURN_NONE;
 }
@@ -379,7 +379,7 @@ get_chars_array(PyObject *seq, Allocator alloc, DeAllocator dealloc)
 	    FAIL_SETTING_ARRAY(val, arrlen, dealloc);
 	}
 
-	if (!(*val++ = get_chars(item, alloc))) {
+	if (!(*val++ = (char *)get_chars(item, alloc))) {
 	    FAIL_SETTING_ARRAY(val, arrlen, dealloc);
 	}
 	i++;
@@ -406,7 +406,7 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
     if (IS_PY_STRING(value)) {
 	char *s;
 
-	if (!(s = get_chars(value, zalloc)))
+	if (!(s = (char *)get_chars(value, zalloc)))
 	    return NULL;
 
 	if (!setsparam(name, s)) {
@@ -463,10 +463,10 @@ ZshSetValue(UNUSED(PyObject *self), PyObject *args)
 		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 
-	    if (!(*val++ = get_chars(pkey, zalloc))) {
+	    if (!(*val++ = (char *)get_chars(pkey, zalloc))) {
 		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
-	    if (!(*val++ = get_chars(pval, zalloc))) {
+	    if (!(*val++ = (char *)get_chars(pval, zalloc))) {
 		FAIL_SETTING_ARRAY(val, arrlen, zfree);
 	    }
 	}
@@ -629,7 +629,7 @@ get_sh_item_value(PyObject *obj, PyObject *keyobj)
 	Py_DECREF(valobj);
     }
 
-    if (!(str = get_chars(string, zhalloc))) {
+    if (!(str = (char *)get_chars(string, zhalloc))) {
 	Py_DECREF(string);
 	ZFAIL_NOFINISH(("Failed to get string from value string object"),
 		dupstring(""));
@@ -769,7 +769,7 @@ scan_special_hash(HashTable ht, ScanFunc func, int flags)
 	    ZFAIL(("Key is not a string"), );
 	}
 
-	if (!(str = get_chars(keyobj, zhalloc))) {
+	if (!(str = (char *)get_chars(keyobj, zhalloc))) {
 	    Py_DECREF(iter);
 	    Py_DECREF(keyobj);
 	    ZFAIL(("Failed to get string from key string object"), );
@@ -802,7 +802,7 @@ get_special_string(Param pm)
 		    pm->node.nam), dupstring(""));
     }
 
-    if (!(r = get_chars(robj, zhalloc))) {
+    if (!(r = (char *)get_chars(robj, zhalloc))) {
 	ZFAIL(("Failed to transform value for parameter %s", pm->node.nam),
 		dupstring(""));
     }
@@ -1560,7 +1560,7 @@ get_no_null_chars(PyObject *string)
     }
     else {
 #if defined(PY_VERSION_HEX) && PY_VERSION_HEX >= 0x03030000
-	if (!(str = PyUnicode_AsUTF8AndSize(string, NULL)))
+	if (!(str = (char *)PyUnicode_AsUTF8AndSize(string, NULL)))
 	    return NULL;
 #else
 	PyObject *bytes;
